@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.23)
-project(acquire-driver-zarr)
+project(acquire-zarr)
 cmake_policy(SET CMP0079 NEW) # allows use with targets in other directories
 enable_testing()
 
@@ -20,10 +20,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(NOTEST "Disable all tests" OFF)
-option(BUILD_ACQUIRE_DRIVER_ZARR "Build the Acquire Zarr driver" ON)
 
 add_subdirectory(src)
 add_subdirectory(tests)
-add_subdirectory(examples)
 
 include(CPack)
