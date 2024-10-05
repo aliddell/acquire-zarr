@@ -13,7 +13,7 @@ env:
 
 jobs:
   test:
-    name: ${{ matrix.platform }}
+    name: Test on ${{ matrix.platform }}
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 20
     strategy:
@@ -63,4 +63,78 @@ jobs:
 
       - name: Test
         working-directory: ${{github.workspace}}/build
-        run: ctest -C ${{env.BUILD_TYPE}} -L acquire-driver-zarr --output-on-failure
+        run: ctest -C ${{env.BUILD_TYPE}} -L acquire-zarr --output-on-failure
+
+  test_s3:
+    name: Test S3
+    runs-on: ubuntu-latest
+    env:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password
+      MINIO_URL: http://localhost:9000
+      MINIO_ALIAS: myminio
+      MINIO_BUCKET: acquire-test
+      MINIO_ACCESS_KEY: acquire
+      MINIO_SECRET_KEY: 12345678
+
+    steps:
+      - name: Cancel Previous Runs
+        uses: styfle/cancel-workflow-action@0.10.0
+        with:
+          access_token: ${{ github.token }}
+
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install minio and mcli
+        run: |
+          apt update && apt install -y tmux wget
+          wget https://dl.min.io/server/minio/release/linux-amd64/minio -O /usr/local/bin/minio
+          wget https://dl.min.io/client/mc/release/linux-amd64/mc -O /usr/local/bin/mcli
+          chmod +x /usr/local/bin/minio
+          chmod +x /usr/local/bin/mcli
+
+      - name: Start minio in tmux
+        run: |
+          tmux new -d -s minio
+          tmux send-keys -t minio "MINIO_ROOT_USER=$MINIO_ROOT_USER MINIO_ROOT_PASSWORD=$MINIO_ROOT_PASSWORD minio server /tmp/minio --console-address :9001" Enter
+          sleep 5
+          mcli alias set $MINIO_ALIAS $MINIO_URL $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD
+          mcli admin user svcacct add --access-key $MINIO_ACCESS_KEY --secret-key $MINIO_SECRET_KEY $MINIO_ALIAS $MINIO_ROOT_USER
+
+      - name: Create a bucket
+        run: |
+          mcli mb $MINIO_ALIAS/$MINIO_BUCKET
+
+      - name: Install vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git
+          cd vcpkg && ./bootstrap-vcpkg.sh
+          echo "VCPKG_ROOT=${{github.workspace}}/vcpkg" >> $GITHUB_ENV
+          echo "${{github.workspace}}/vcpkg" >> $GITHUB_PATH
+          ./vcpkg integrate install
+        shell: bash
+
+      - name: Configure CMake
+        run: |
+          cmake --preset=default
+          cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+
+      - name: Build
+        run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
+
+      - name: Test
+        working-directory: ${{github.workspace}}/build
+        env:
+          ZARR_S3_ENDPOINT: ${{ env.MINIO_URL }}
+          ZARR_S3_BUCKET_NAME: ${{ env.MINIO_BUCKET }}
+          ZARR_S3_ACCESS_KEY_ID: ${{ env.MINIO_ACCESS_KEY }}
+          ZARR_S3_SECRET_ACCESS_KEY: ${{ env.MINIO_SECRET_KEY }}
+        run: ctest -C ${{env.BUILD_TYPE}} -L s3 --output-on-failure

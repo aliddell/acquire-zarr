@@ -30,5 +30,11 @@ foreach (name ${tests})
     )
 
     add_test(NAME test-${tgt} COMMAND ${tgt})
-    set_tests_properties(test-${tgt} PROPERTIES LABELS "anyplatform;acquire-zarr")
+
+    set(test_labels "anyplatform;acquire-zarr")
+    if (name MATCHES ".*s3.*")
+        list(APPEND test_labels "s3")
+    endif ()
+
+    set_tests_properties(test-${tgt} PROPERTIES LABELS "${test_labels}")
 endforeach ()
