@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - "main"
+  pull_request: # TODO (aliddell): remove this
+    branches:
+      - "main"
 
 jobs:
   windows-and-linux-build:
@@ -93,12 +96,12 @@ jobs:
 
       - name: Build for x64
         run: |
-          cmake --preset=default -DVCPKG_TARGET_TRIPLET=x64-osx -DVCPKG_INSTALLED_DIR=${{github.workspace}}/vcpkg-x64 -B ${{github.workspace}}/build-x64 -DCMAKE_BUILD_TYPE=${{matrix.build_type}} -DCMAKE_OSX_ARCHITECTURES="x86_64" -DNOTEST=1
+          cmake --preset=default -DVCPKG_TARGET_TRIPLET=x64-osx -DVCPKG_INSTALLED_DIR=${{github.workspace}}/vcpkg-x64 -B ${{github.workspace}}/build-x64 -DCMAKE_BUILD_TYPE=${{matrix.build_type}} -DCMAKE_OSX_ARCHITECTURES="x86_64" -DBUILD_TESTING=OFF
           cmake --build ${{github.workspace}}/build-x64 --config ${{matrix.build_type}}
 
       - name: Build for arm64
         run: |
-          cmake --preset=default -DVCPKG_TARGET_TRIPLET=arm64-osx -DVCPKG_INSTALLED_DIR=${{github.workspace}}/vcpkg-arm64 -B ${{github.workspace}}/build-arm64 -DCMAKE_BUILD_TYPE=${{matrix.build_type}} -DCMAKE_OSX_ARCHITECTURES="arm64" -DNOTEST=1
+          cmake --preset=default -DVCPKG_TARGET_TRIPLET=arm64-osx -DVCPKG_INSTALLED_DIR=${{github.workspace}}/vcpkg-arm64 -B ${{github.workspace}}/build-arm64 -DCMAKE_BUILD_TYPE=${{matrix.build_type}} -DCMAKE_OSX_ARCHITECTURES="arm64" -DBUILD_TESTING=OFF
           cmake --build ${{github.workspace}}/build-arm64 --config ${{matrix.build_type}}
 
       - name: Create a universal binary
@@ -115,3 +118,51 @@ jobs:
         with:
           name: macos-latest ${{matrix.build_type}} binaries
           path: ${{github.workspace}}/*.zip
+  
+  build-wheel:
+    strategy:
+      matrix:
+        platform:
+          - "windows-latest"
+          - "ubuntu-latest"
+          - "macos-latest" # TODO (aliddell): universal binary?
+
+    runs-on: ${{ matrix.platform }}
+
+    permissions:
+      actions: write
+
+    steps:
+      - name: Cancel Previous Runs
+        uses: styfle/cancel-workflow-action@0.10.0
+        with:
+          access_token: ${{ github.token }}
+
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git
+          cd vcpkg && ./bootstrap-vcpkg.sh
+          echo "VCPKG_ROOT=${{github.workspace}}/vcpkg" >> $GITHUB_ENV
+          echo "${{github.workspace}}/vcpkg" >> $GITHUB_PATH
+          ./vcpkg integrate install
+        shell: bash
+
+      - name: Install dependencies
+        run: python -m pip install -U pip "pybind11[global]" cmake build
+
+      - name: Build
+        run: python -m build
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v3
+        with:
+          path: ${{github.workspace}}/dist/*.whl
