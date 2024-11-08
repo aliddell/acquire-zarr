@@ -73,7 +73,7 @@ jobs:
       actions: write
 
     concurrency:
-      group: ${{ github.workflow }}-${{ github.ref }}
+      group: ${{ github.workflow }}-${{ github.ref }}-macos-latest-${{ matrix.build_type }}
       cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
     steps:
@@ -114,7 +114,7 @@ jobs:
         with:
           name: macos-latest ${{matrix.build_type}} binaries
           path: ${{github.workspace}}/*.zip
-  
+
   build-wheel:
     strategy:
       matrix:
@@ -129,7 +129,7 @@ jobs:
       actions: write
 
     concurrency:
-      group: ${{ github.workflow }}-${{ github.ref }}
+      group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.platform }}-build-wheel
       cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
     steps:
