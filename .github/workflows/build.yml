@@ -28,7 +28,7 @@ jobs:
       actions: write
 
     concurrency:
-      group: ${{ github.workflow }}-${{ github.ref }}
+      group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.platform }}-${{ matrix.build_type }}
       cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
     steps:
