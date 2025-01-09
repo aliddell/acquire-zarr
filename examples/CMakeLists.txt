@@ -6,6 +6,7 @@ set(examples
         zarrv3-compressed-filesystem
         zarrv3-raw-multiscale-filesystem
         zarrv3-raw-s3
+        leak-checker
 )
 
 foreach (name ${examples})
