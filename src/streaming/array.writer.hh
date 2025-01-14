@@ -93,6 +93,9 @@ class ArrayWriter
     void compress_buffers_();
 
     void flush_();
+
+    [[nodiscard]] virtual bool compress_and_flush_data_() = 0;
+    [[nodiscard]] bool compress_buffer_(uint32_t index);
     [[nodiscard]] virtual bool flush_impl_() = 0;
     void rollover_();
 

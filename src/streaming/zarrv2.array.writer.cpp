@@ -73,7 +73,7 @@ zarr::ZarrV2ArrayWriter::ZarrV2ArrayWriter(
 }
 
 bool
-zarr::ZarrV2ArrayWriter::flush_impl_()
+zarr::ZarrV2ArrayWriter::compress_and_flush_data_()
 {
     // create chunk files
     CHECK(data_sinks_.empty());
@@ -81,6 +81,56 @@ zarr::ZarrV2ArrayWriter::flush_impl_()
         return false;
     }
 
+    const auto n_chunks = chunk_buffers_.size();
+    CHECK(data_sinks_.size() == n_chunks);
+
+    std::atomic<char> all_successful = 1;
+    std::latch latch(n_chunks);
+    for (auto i = 0; i < n_chunks; ++i) {
+        EXPECT(
+          thread_pool_->push_job(
+            std::move([this, i, &latch, &all_successful](std::string& err) {
+                bool success = true;
+
+                try {
+                    if (all_successful) {
+                        if (!compress_buffer_(i)) { // no-op if no compression
+                            err = "Failed to compress buffer";
+                            latch.count_down();
+                            return false;
+                        }
+
+                        auto& chunk = chunk_buffers_.at(i);
+                        auto& sink = data_sinks_.at(i);
+
+                        if (!sink->write(
+                              0,
+                              { reinterpret_cast<std::byte*>(chunk.data()),
+                                chunk.size() })) {
+                            err = "Failed to write chunk";
+                            success = false;
+                        }
+                    }
+                } catch (const std::exception& exc) {
+                    err = "Failed to flush data: " + std::string(exc.what());
+                    success = false;
+                }
+
+                latch.count_down();
+
+                all_successful.fetch_and(static_cast<char>(success));
+                return success;
+            })),
+          "Failed to push job to thread pool");
+    }
+
+    latch.wait();
+    return static_cast<bool>(all_successful);
+}
+
+bool
+zarr::ZarrV2ArrayWriter::flush_impl_()
+{
     CHECK(data_sinks_.size() == chunk_buffers_.size());
 
     std::latch latch(chunk_buffers_.size());
