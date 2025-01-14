@@ -20,7 +20,6 @@ struct ZarrV3ArrayWriter : public ArrayWriter
 
     ZarrVersion version_() const override { return ZarrVersion_3; }
     bool compress_and_flush_data_() override;
-    bool flush_impl_() override;
     bool write_array_metadata_() override;
     bool should_rollover_() const override;
 };

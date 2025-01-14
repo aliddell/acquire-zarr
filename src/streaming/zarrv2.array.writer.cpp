@@ -129,46 +129,6 @@ zarr::ZarrV2ArrayWriter::compress_and_flush_data_()
 }
 
 bool
-zarr::ZarrV2ArrayWriter::flush_impl_()
-{
-    CHECK(data_sinks_.size() == chunk_buffers_.size());
-
-    std::latch latch(chunk_buffers_.size());
-    {
-        std::scoped_lock lock(buffers_mutex_);
-        for (auto i = 0; i < data_sinks_.size(); ++i) {
-            auto& chunk = chunk_buffers_.at(i);
-            EXPECT(thread_pool_->push_job(
-                     std::move([&sink = data_sinks_.at(i),
-                                data_ = chunk.data(),
-                                size = chunk.size(),
-                                &latch](std::string& err) -> bool {
-                         bool success = false;
-                         try {
-                             std::span data{
-                                 reinterpret_cast<std::byte*>(data_), size
-                             };
-                             CHECK(sink->write(0, data));
-                             success = true;
-                         } catch (const std::exception& exc) {
-                             err = "Failed to write chunk: " +
-                                   std::string(exc.what());
-                         }
-
-                         latch.count_down();
-                         return success;
-                     })),
-                   "Failed to push job to thread pool");
-        }
-    }
-
-    // wait for all threads to finish
-    latch.wait();
-
-    return true;
-}
-
-bool
 zarr::ZarrV2ArrayWriter::write_array_metadata_()
 {
     if (!make_metadata_sink_()) {
