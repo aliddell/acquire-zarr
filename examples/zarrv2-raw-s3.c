@@ -1,5 +1,5 @@
-/// @file zarrv3-raw-s3.c
-/// @brief Zarr V3 with uncompressed data to S3
+/// @file zarrv2-raw-s3.c
+/// @brief Zarr V2 with uncompressed data to S3
 #include "acquire.zarr.h"
 #include <math.h>
 #include <stdio.h>
@@ -18,11 +18,11 @@ main()
 
     // Configure stream settings
     ZarrStreamSettings settings = {
-        .store_path = "output_v3_s3.zarr",
+        .store_path = "output_v2_s3.zarr",
         .s3_settings = &s3,
         .compression_settings = NULL, // No compression
         .data_type = ZarrDataType_uint16,
-        .version = ZarrVersion_3,
+        .version = ZarrVersion_2,
     };
 
     // Set up dimensions (t, y, x)
@@ -33,7 +33,6 @@ main()
         .type = ZarrDimensionType_Time,
         .array_size_px = 0, // Unlimited
         .chunk_size_px = 5,
-        .shard_size_chunks = 2,
     };
 
     settings.dimensions[1] = (ZarrDimensionProperties){
@@ -41,7 +40,6 @@ main()
         .type = ZarrDimensionType_Space,
         .array_size_px = 48,
         .chunk_size_px = 16,
-        .shard_size_chunks = 1,
     };
 
     settings.dimensions[2] = (ZarrDimensionProperties){
@@ -49,7 +47,6 @@ main()
         .type = ZarrDimensionType_Space,
         .array_size_px = 64,
         .chunk_size_px = 16,
-        .shard_size_chunks = 2,
     };
 
     // Create stream

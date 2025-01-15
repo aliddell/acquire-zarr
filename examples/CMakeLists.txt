@@ -2,6 +2,7 @@ set(project acquire-zarr)
 
 set(examples
         zarrv2-raw-filesystem
+        zarrv2-raw-s3
         zarrv2-compressed-s3
         zarrv3-raw-filesystem
         zarrv3-compressed-filesystem
