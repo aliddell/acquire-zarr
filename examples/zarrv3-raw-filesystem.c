@@ -1,5 +1,5 @@
-/// @file zarr-v3-compressed-filesystem.c
-/// @brief Zarr V3 with LZ4 compression to filesystem
+/// @file zarr-v3-raw-filesystem.c
+/// @brief Basic Zarr V3 streaming to filesystem
 #include "acquire.zarr.h"
 
 #include <math.h>
@@ -9,19 +9,11 @@
 int
 main()
 {
-    // Configure compression
-    ZarrCompressionSettings compression = {
-        .compressor = ZarrCompressor_Blosc1,
-        .codec = ZarrCompressionCodec_BloscLZ4,
-        .level = 1,
-        .shuffle = 1,
-    };
-
     // Configure stream settings
     ZarrStreamSettings settings = {
-        .store_path = "output_v3_compressed.zarr",
+        .store_path = "output_v3.zarr",
         .s3_settings = NULL,
-        .compression_settings = &compression,
+        .compression_settings = NULL,
         .data_type = ZarrDataType_uint16,
         .version = ZarrVersion_3,
     };
@@ -66,9 +58,6 @@ main()
     // Create sample data
     const size_t width = 64;
     const size_t height = 48;
-    int centerX = width / 2;
-    int centerY = height / 2;
-
     uint16_t* frame = (uint16_t*)malloc(width * height * sizeof(uint16_t));
 
     // Write frames
@@ -76,7 +65,6 @@ main()
     for (int t = 0; t < 50; t++) {
         // Fill frame with a moving diagonal pattern
         for (size_t y = 0; y < height; y++) {
-            int dy = y - centerY;
             for (size_t x = 0; x < width; x++) {
                 // Create a diagonal pattern that moves with time
                 // and varies intensity based on position
@@ -91,7 +79,10 @@ main()
                 }
 
                 // Add some circular features
+                int centerX = width / 2;
+                int centerY = height / 2;
                 int dx = x - centerX;
+                int dy = y - centerY;
                 int radius = (int)sqrt(dx*dx + dy*dy);
 
                 // Modulate the pattern with concentric circles
