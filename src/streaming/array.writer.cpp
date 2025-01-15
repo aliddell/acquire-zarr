@@ -6,7 +6,6 @@
 
 #include <cmath>
 #include <functional>
-#include <latch>
 #include <stdexcept>
 
 #ifdef min
@@ -126,7 +125,15 @@ zarr::ArrayWriter::write_frame(std::span<const std::byte> data)
     ++frames_written_;
 
     if (should_flush_()) {
-        flush_();
+        CHECK(compress_and_flush_data_());
+
+        if (should_rollover_()) {
+            rollover_();
+            CHECK(write_array_metadata_());
+        }
+
+        make_buffers_();
+        bytes_to_flush_ = 0;
     }
 
     return bytes_written;
@@ -333,32 +340,6 @@ zarr::ArrayWriter::should_flush_() const
 
     CHECK(frames_before_flush > 0);
     return frames_written_ % frames_before_flush == 0;
-}
-
-void
-zarr::ArrayWriter::flush_()
-{
-    if (bytes_to_flush_ == 0) {
-        return;
-    }
-
-    // compress buffers and write out
-    CHECK(compress_and_flush_data_());
-
-    const auto should_rollover = should_rollover_();
-    if (should_rollover) {
-        rollover_();
-    }
-
-    if (should_rollover || is_finalizing_) {
-        CHECK(write_array_metadata_());
-    }
-
-    // reset buffers
-    make_buffers_();
-
-    // reset state
-    bytes_to_flush_ = 0;
 }
 
 bool
