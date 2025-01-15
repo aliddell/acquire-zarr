@@ -90,7 +90,6 @@ class ArrayWriter
     virtual bool should_rollover_() const = 0;
 
     size_t write_frame_to_chunks_(std::span<const std::byte> data);
-    void compress_buffers_();
 
     void flush_();
 
