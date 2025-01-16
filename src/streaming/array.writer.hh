@@ -90,10 +90,11 @@ class ArrayWriter
     virtual bool should_rollover_() const = 0;
 
     size_t write_frame_to_chunks_(std::span<const std::byte> data);
-    void compress_buffers_();
 
     void flush_();
-    [[nodiscard]] virtual bool flush_impl_() = 0;
+
+    [[nodiscard]] virtual bool compress_and_flush_data_() = 0;
+    [[nodiscard]] bool compress_buffer_(uint32_t index);
     void rollover_();
 
     [[nodiscard]] virtual bool write_array_metadata_() = 0;
