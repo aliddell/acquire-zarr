@@ -412,7 +412,9 @@ zarr::finalize_array(std::unique_ptr<ArrayWriter>&& writer)
         if (writer->bytes_to_flush_ > 0) {
             CHECK(writer->compress_and_flush_data_());
         }
-        CHECK(writer->write_array_metadata_());
+        if (writer->frames_written_ > 0) {
+            CHECK(writer->write_array_metadata_());
+        }
         writer->close_sinks_();
     } catch (const std::exception& exc) {
         LOG_ERROR("Failed to finalize array writer: ", exc.what());
