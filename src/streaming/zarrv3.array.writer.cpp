@@ -89,6 +89,26 @@ zarr::ZarrV3ArrayWriter::ZarrV3ArrayWriter(
     }
 }
 
+std::string
+zarr::ZarrV3ArrayWriter::data_root_() const
+{
+    return config_.store_path + "/" + std::to_string(config_.level_of_detail) +
+           "/c/" + std::to_string(append_chunk_index_);
+}
+
+std::string
+zarr::ZarrV3ArrayWriter::metadata_path_() const
+{
+    return config_.store_path + "/" + std::to_string(config_.level_of_detail) +
+           "/zarr.json";
+}
+
+const DimensionPartsFun
+zarr::ZarrV3ArrayWriter::parts_along_dimension_() const
+{
+    return shards_along_dimension;
+}
+
 bool
 zarr::ZarrV3ArrayWriter::compress_and_flush_data_()
 {

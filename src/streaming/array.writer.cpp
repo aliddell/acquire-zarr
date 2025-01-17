@@ -148,25 +148,8 @@ zarr::ArrayWriter::is_s3_array_() const
 bool
 zarr::ArrayWriter::make_data_sinks_()
 {
-    std::string data_root;
-    std::function<size_t(const ZarrDimension&)> parts_along_dimension;
-    switch (version_()) {
-        case ZarrVersion_2:
-            parts_along_dimension = chunks_along_dimension;
-            data_root = config_.store_path + "/" +
-                        std::to_string(config_.level_of_detail) + "/" +
-                        std::to_string(append_chunk_index_);
-            break;
-        case ZarrVersion_3:
-            parts_along_dimension = shards_along_dimension;
-            data_root = config_.store_path + "/" +
-                        std::to_string(config_.level_of_detail) + "/c/" +
-                        std::to_string(append_chunk_index_);
-            break;
-        default:
-            LOG_ERROR("Unsupported Zarr version");
-            return false;
-    }
+    const auto data_root = data_root_();
+    const auto parts_along_dimension = parts_along_dimension_();
 
     SinkCreator creator(thread_pool_, s3_connection_pool_);
 
@@ -200,22 +183,7 @@ zarr::ArrayWriter::make_metadata_sink_()
         return true;
     }
 
-    std::string metadata_path;
-    switch (version_()) {
-        case ZarrVersion_2:
-            metadata_path = config_.store_path + "/" +
-                            std::to_string(config_.level_of_detail) +
-                            "/.zarray";
-            break;
-        case ZarrVersion_3:
-            metadata_path = config_.store_path + "/" +
-                            std::to_string(config_.level_of_detail) +
-                            "/zarr.json";
-            break;
-        default:
-            LOG_ERROR("Unsupported Zarr version");
-            return false;
-    }
+    const auto metadata_path = metadata_path_();
 
     if (is_s3_array_()) {
         SinkCreator creator(thread_pool_, s3_connection_pool_);

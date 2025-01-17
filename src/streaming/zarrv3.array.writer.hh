@@ -18,7 +18,9 @@ struct ZarrV3ArrayWriter : public ArrayWriter
     std::vector<std::vector<uint64_t>> shard_tables_;
     uint32_t flushed_count_;
 
-    ZarrVersion version_() const override { return ZarrVersion_3; }
+    std::string data_root_() const override;
+    std::string metadata_path_() const override;
+    const DimensionPartsFun parts_along_dimension_() const override;
     bool compress_and_flush_data_() override;
     bool write_array_metadata_() override;
     bool should_rollover_() const override;
