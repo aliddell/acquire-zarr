@@ -61,6 +61,7 @@ setup()
         .compression_settings = nullptr,
         .data_type = ZarrDataType_uint16,
         .version = ZarrVersion_3,
+        .max_threads = 0, // use all available threads
     };
 
     CHECK_OK(ZarrStreamSettings_create_dimension_array(&settings, 5));

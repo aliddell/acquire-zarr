@@ -374,9 +374,21 @@ ZarrStream::ZarrStream_s(struct ZarrStreamSettings_s* settings)
     commit_settings_(settings);
 
     // spin up thread pool
+    unsigned int max_threads = settings->max_threads;
+    const auto hardware_concurrency = std::thread::hardware_concurrency();
+
+    if (max_threads == 0) {
+        if (hardware_concurrency > 0) {
+            LOG_DEBUG("Using ", hardware_concurrency, " threads");
+            max_threads = hardware_concurrency;
+        } else {
+            LOG_WARNING(
+              "Unable to determine hardware concurrency, using 1 thread");
+            max_threads = 1;
+        }
+    }
     thread_pool_ = std::make_shared<zarr::ThreadPool>(
-      std::thread::hardware_concurrency(),
-      [this](const std::string& err) { this->set_error_(err); });
+      max_threads, [this](const std::string& err) { this->set_error_(err); });
 
     // allocate a frame buffer
     frame_buffer_.resize(
