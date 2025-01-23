@@ -13,10 +13,12 @@ static const fs::path test_path = "multi-frame-test.zarr";
 
 static ZarrStream* 
 setup() {
+    const auto test_path_str = test_path.string();
+
     ZarrStreamSettings settings = {  
-        .store_path = test_path.string().c_str(),
-        .version = ZarrVersion_3,
+        .store_path = test_path_str.c_str(),
         .data_type = ZarrDataType_uint16,
+        .version = ZarrVersion_3,
     };
 
     CHECK(ZarrStatusCode_Success == 
