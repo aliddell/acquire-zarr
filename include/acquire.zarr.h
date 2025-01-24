@@ -100,8 +100,8 @@ extern "C"
      * can be appended in a single call.
      * @param[in, out] stream The Zarr stream struct.
      * @param[in] data The data to append.
-     * @param[in] bytes_in The number of bytes in @p data. This can be the size of
-     * one or multiple frames, but must be a multiple of the frame size.
+     * @param[in] bytes_in The number of bytes in @p data. This can be any
+     * nonnegative integer. On a value of 0, this function will immediately return.
      * @param[out] bytes_out The number of bytes written to the stream.
      * @return ZarrStatusCode_Success on success, or an error code on failure.
      */
