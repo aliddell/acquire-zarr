@@ -87,7 +87,8 @@ extern "C"
 
     /**
      * @brief Destroy a Zarr stream.
-     * @details This function frees the memory allocated for the Zarr stream.
+     * @details This function waits for all pending writes to complete and frees the 
+     * memory allocated for the Zarr stream.
      * @param stream The Zarr stream struct to destroy.
      */
     void ZarrStream_destroy(ZarrStream* stream);
