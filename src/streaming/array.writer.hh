@@ -78,9 +78,10 @@ class ArrayWriter
 
     std::shared_ptr<S3ConnectionPool> s3_connection_pool_;
 
-    virtual ZarrVersion version_() const = 0;
-
     bool is_s3_array_() const;
+    virtual std::string data_root_() const = 0;
+    virtual std::string metadata_path_() const = 0;
+    virtual const DimensionPartsFun parts_along_dimension_() const = 0;
 
     [[nodiscard]] bool make_data_sinks_();
     [[nodiscard]] bool make_metadata_sink_();
