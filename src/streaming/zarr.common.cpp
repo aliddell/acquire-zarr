@@ -1,8 +1,8 @@
 #include "macros.hh"
 #include "zarr.common.hh"
 
+#include <queue>
 #include <stdexcept>
-#include <algorithm>
 
 std::string
 zarr::trim(std::string_view s)

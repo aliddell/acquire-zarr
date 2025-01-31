@@ -1,7 +1,8 @@
 #pragma once
 
-#include "zarr.dimension.hh"
 #include "acquire.zarr.h"
+#include "thread.pool.hh"
+#include "zarr.dimension.hh"
 
 namespace zarr {
 /**
