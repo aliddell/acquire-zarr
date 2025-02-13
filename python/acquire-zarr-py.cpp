@@ -420,6 +420,10 @@ class PyZarrStream
 
 PYBIND11_MODULE(acquire_zarr, m)
 {
+    py::options options;
+    options.disable_user_defined_docstrings();
+    options.disable_function_signatures();
+
     using namespace pybind11::literals;
 
     m.doc() = R"pbdoc(
@@ -572,7 +576,6 @@ PYBIND11_MODULE(acquire_zarr, m)
       .def_property("shard_size_chunks",
                     &PyZarrDimensionProperties::shard_size_chunks,
                     &PyZarrDimensionProperties::set_shard_size_chunks);
-
     py::class_<PyZarrStreamSettings>(m, "StreamSettings", py::dynamic_attr())
       .def(py::init([](py::kwargs kwargs) {
           PyZarrStreamSettings settings;
