@@ -16,6 +16,7 @@ This library has the following dependencies:
 - [c-blosc](https://github.com/Blosc/c-blosc) v1.21.5
 - [nlohmann-json](https://github.com/nlohmann/json) v3.11.3
 - [minio-cpp](https://github.com/minio/minio-cpp) v0.3.0
+- [crc32c](https://github.com/google/crc32c) v1.1.2
 
 We use [vcpkg] to install them, as it integrates well with CMake.
 To install vcpkg, clone the repository and bootstrap it:
