@@ -1,4 +1,4 @@
-from python.tests.test_stream import store_path
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14828040.svg)](https://doi.org/10.5281/zenodo.14828040)
 
 # Acquire Zarr streaming library
 
@@ -7,6 +7,10 @@ from python.tests.test_stream import store_path
 [![Chat](https://img.shields.io/badge/zulip-join_chat-brightgreen.svg)](https://acquire-imaging.zulipchat.com/)
 
 This library supports chunked, compressed, multiscale streaming to [Zarr][], with [OME-NGFF metadata].
+
+This code builds targets for python and C.
+
+For python: `pip install acquire-zarr`
 
 ## Building
 
