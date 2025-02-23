@@ -75,7 +75,11 @@ def s3_settings():
     ):
         yield None
     else:
-        region = os.environ["ZARR_S3_REGION"] if "ZARR_S3_REGION" in os.environ else None
+        region = (
+            os.environ["ZARR_S3_REGION"]
+            if "ZARR_S3_REGION" in os.environ
+            else None
+        )
         yield S3Settings(
             endpoint=os.environ["ZARR_S3_ENDPOINT"],
             bucket_name=os.environ["ZARR_S3_BUCKET_NAME"],
@@ -232,9 +236,7 @@ def test_stream_data_to_filesystem(
     stream = ZarrStream(settings)
     assert stream
 
-    data = np.random.randint(
-        0,
-        255,
+    data = np.zeros(
         (
             settings.dimensions[0].chunk_size_px,
             settings.dimensions[1].array_size_px,
@@ -242,9 +244,26 @@ def test_stream_data_to_filesystem(
         ),
         dtype=np.uint8,
     )
+    for i in range(data.shape[0]):
+        data[i, :, :] = i
+
     stream.append(data)
 
     del stream  # close the stream, flush the files
+
+    chunk_size_bytes = data.dtype.itemsize
+    for dim in settings.dimensions:
+        chunk_size_bytes *= dim.chunk_size_px
+
+    shard_size_bytes = chunk_size_bytes
+    table_size_bytes = 16  # 2 * sizeof(uint64_t)
+    if version == ZarrVersion.V3:
+        for dim in settings.dimensions:
+            shard_size_bytes *= dim.shard_size_chunks
+            table_size_bytes *= dim.shard_size_chunks
+    shard_size_bytes = (
+        shard_size_bytes + table_size_bytes + 4
+    )  # 4 bytes for crc32c checksum
 
     group = zarr.open(settings.store_path, mode="r")
     array = group["0"]
@@ -265,6 +284,12 @@ def test_stream_data_to_filesystem(
             assert compressor.cname == cname
             assert compressor.clevel == 1
             assert compressor.shuffle == ncblosc.SHUFFLE
+
+            # check that the data is compressed
+            assert (store_path / "test.zarr" / "0" / "0" / "0" / "0").is_file()
+            assert (
+                store_path / "test.zarr" / "0" / "0" / "0" / "0"
+            ).stat().st_size <= chunk_size_bytes
         else:
             cname = (
                 zblosc.BloscCname.lz4
@@ -275,11 +300,30 @@ def test_stream_data_to_filesystem(
             assert blosc_codec.cname == cname
             assert blosc_codec.clevel == 1
             assert blosc_codec.shuffle == zblosc.BloscShuffle.shuffle
+
+            assert (
+                store_path / "test.zarr" / "0" / "c" / "0" / "0" / "0"
+            ).is_file()
+            assert (
+                store_path / "test.zarr" / "0" / "c" / "0" / "0" / "0"
+            ).stat().st_size <= shard_size_bytes
     else:
         if version == ZarrVersion.V2:
             assert metadata.compressor is None
+
+            assert (store_path / "test.zarr" / "0" / "0" / "0" / "0").is_file()
+            assert (
+                store_path / "test.zarr" / "0" / "0" / "0" / "0"
+            ).stat().st_size == chunk_size_bytes
         else:
             assert len(metadata.codecs[0].codecs) == 1
+
+            assert (
+                store_path / "test.zarr" / "0" / "c" / "0" / "0" / "0"
+            ).is_file()
+            assert (
+                store_path / "test.zarr" / "0" / "c" / "0" / "0" / "0"
+            ).stat().st_size == shard_size_bytes
 
 
 @pytest.mark.parametrize(

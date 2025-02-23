@@ -13,6 +13,11 @@ def settings():
     return acquire_zarr.StreamSettings()
 
 
+@pytest.fixture(scope="function")
+def compression_settings():
+    return acquire_zarr.CompressionSettings()
+
+
 def test_settings_set_store_path(settings):
     assert settings.store_path == ""
 
@@ -140,7 +145,16 @@ def test_set_version(settings):
 
 
 def test_set_max_threads(settings):
-    assert settings.max_threads > 0 # depends on your system, but will be nonzero
+    assert (
+        settings.max_threads > 0
+    )  # depends on your system, but will be nonzero
 
     settings.max_threads = 4
     assert settings.max_threads == 4
+
+
+def test_set_clevel(compression_settings):
+    assert compression_settings.level == 1
+
+    compression_settings.level = 6
+    assert compression_settings.level == 6
