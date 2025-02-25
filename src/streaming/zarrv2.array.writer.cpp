@@ -92,6 +92,28 @@ zarr::ZarrV2ArrayWriter::parts_along_dimension_() const
     return chunks_along_dimension;
 }
 
+void
+zarr::ZarrV2ArrayWriter::make_buffers_()
+{
+    LOG_DEBUG("Creating chunk buffers");
+
+    const size_t n_chunks = config_.dimensions->number_of_chunks_in_memory();
+    data_buffers_.resize(n_chunks); // no-op if already the correct size
+
+    const auto n_bytes = bytes_to_allocate_per_chunk_();
+
+    for (auto& buf : data_buffers_) {
+        buf.resize(n_bytes);
+        std::fill(buf.begin(), buf.end(), std::byte(0));
+    }
+}
+
+BytePtr
+zarr::ZarrV2ArrayWriter::get_chunk_data_(uint32_t index)
+{
+    return data_buffers_[index].data();
+}
+
 bool
 zarr::ZarrV2ArrayWriter::compress_and_flush_data_()
 {
@@ -101,7 +123,7 @@ zarr::ZarrV2ArrayWriter::compress_and_flush_data_()
         return false;
     }
 
-    const auto n_chunks = chunk_buffers_.size();
+    const auto n_chunks = data_buffers_.size();
     CHECK(data_sinks_.size() == n_chunks);
 
     std::atomic<char> all_successful = 1;
@@ -113,23 +135,39 @@ zarr::ZarrV2ArrayWriter::compress_and_flush_data_()
               thread_pool_->push_job(
                 std::move([this, i, &latch, &all_successful](std::string& err) {
                     bool success = true;
+                    if (!all_successful) {
+                        latch.count_down();
+                        return false;
+                    }
+
+                    const auto params = config_.compression_params;
+                    auto bytes_of_raw_chunk =
+                      config_.dimensions->bytes_per_chunk();
+
+                    auto* chunk_ptr = get_chunk_data_(i);
 
                     try {
-                        if (all_successful) {
-                            EXPECT(
-                              compress_buffer_(i), // no-op if no compression
-                              "Failed to compress buffer");
+                        if (params) {
+                            const auto bytes_per_px =
+                              bytes_of_type(config_.dtype);
 
-                            auto& chunk = chunk_buffers_[i];
-                            auto& sink = data_sinks_[i];
+                            const int nb = compress_buffer_in_place(
+                              chunk_ptr,
+                              bytes_to_allocate_per_chunk_(),
+                              bytes_of_raw_chunk,
+                              *params,
+                              bytes_per_px);
+                            EXPECT(nb > 0, "Failed to compress chunk ", i);
 
-                            if (!sink->write(
-                                  0,
-                                  { reinterpret_cast<std::byte*>(chunk.data()),
-                                    chunk.size() })) {
-                                err = "Failed to write chunk";
-                                success = false;
-                            }
+                            bytes_of_raw_chunk = nb;
+                        }
+
+                        auto& sink = data_sinks_[i];
+
+                        std::span chunk_data(chunk_ptr, bytes_of_raw_chunk);
+                        if (!sink->write(0, chunk_data)) {
+                            err = "Failed to write chunk";
+                            success = false;
                         }
                     } catch (const std::exception& exc) {
                         err =
