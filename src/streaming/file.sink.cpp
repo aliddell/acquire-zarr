@@ -1,33 +1,42 @@
 #include "file.sink.hh"
 #include "macros.hh"
 
-#include <filesystem>
+#include <string_view>
 
-namespace fs = std::filesystem;
+void
+init_handle(void**, std::string_view);
 
-zarr::FileSink::FileSink(std::string_view filename, bool truncate)
-  : file_(filename.data(),
-          truncate ? (std::ios::binary | std::ios::trunc) : std::ios::binary)
+void
+destroy_handle(void**);
+bool
+seek_and_write(void**, size_t, ConstByteSpan);
+
+bool
+flush_file(void**);
+
+zarr::FileSink::FileSink(std::string_view filename)
 {
-    EXPECT(file_.is_open(), "Failed to open file ", filename);
+    init_handle(&handle_, filename);
+}
+
+zarr::FileSink::~FileSink()
+{
+    destroy_handle(&handle_);
 }
 
 bool
-zarr::FileSink::write(size_t offset, std::span<const std::byte> data)
+zarr::FileSink::write(size_t offset, ConstByteSpan data)
 {
     const auto bytes_of_buf = data.size();
     if (data.data() == nullptr || bytes_of_buf == 0) {
         return true;
     }
 
-    file_.seekp(offset);
-    file_.write(reinterpret_cast<const char*>(data.data()), bytes_of_buf);
-    return true;
+    return seek_and_write(&handle_, offset, data);
 }
 
 bool
 zarr::FileSink::flush_()
 {
-    file_.flush();
-    return true;
+    return flush_file(&handle_);
 }

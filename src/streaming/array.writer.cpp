@@ -5,11 +5,13 @@
 #include "sink.hh"
 
 #include <cmath>
+#include <execution>
 #include <functional>
 #include <stdexcept>
 
-#ifdef min
+#if defined(min) || defined(max)
 #undef min
+#undef max
 #endif
 
 bool
@@ -176,7 +178,7 @@ zarr::ArrayWriter::make_metadata_sink_()
     metadata_sink_ =
       is_s3_array_()
         ? make_s3_sink(*config_.bucket_name, metadata_path, s3_connection_pool_)
-        : make_file_sink(metadata_path, true);
+        : make_file_sink(metadata_path);
 
     if (!metadata_sink_) {
         LOG_ERROR("Failed to create metadata sink: ", metadata_path);
@@ -209,8 +211,6 @@ zarr::ArrayWriter::write_frame_to_chunks_(std::span<const std::byte> data)
     const auto bytes_per_chunk = dimensions->bytes_per_chunk();
     const auto bytes_per_row = tile_cols * bytes_per_px;
 
-    size_t bytes_written = 0;
-
     const auto n_tiles_x = (frame_cols + tile_cols - 1) / tile_cols;
     const auto n_tiles_y = (frame_rows + tile_rows - 1) / tile_rows;
 
@@ -224,44 +224,58 @@ zarr::ArrayWriter::write_frame_to_chunks_(std::span<const std::byte> data)
     const auto chunk_offset =
       static_cast<long long>(dimensions->chunk_internal_offset(frame_id));
 
-    for (auto i = 0; i < n_tiles_y; ++i) {
-        // TODO (aliddell): we can optimize this when tiles_per_frame_x_ is 1
-        for (auto j = 0; j < n_tiles_x; ++j) {
-            const auto c = group_offset + i * n_tiles_x + j;
-            auto chunk_ptr = get_chunk_data_(c) + chunk_offset;
-            const auto chunk_end = chunk_ptr + bytes_per_chunk;
+    const auto* data_ptr = data.data();
+    const auto data_size = data.size();
 
-            for (auto k = 0; k < tile_rows; ++k) {
-                const auto frame_row = i * tile_rows + k;
-                if (frame_row < frame_rows) {
-                    const auto frame_col = j * tile_cols;
+    size_t bytes_written = 0;
+    const auto n_tiles = n_tiles_x * n_tiles_y;
 
-                    const auto region_width =
-                      std::min(frame_col + tile_cols, frame_cols) - frame_col;
+    // Using the entire thread pool breaks in CI due to a likely resource
+    // contention. Using 75% of the thread pool should be enough to avoid, but
+    // we should still find a fix if we can.
+#pragma omp parallel for reduction(+ : bytes_written)                          \
+  num_threads(std::max(3 * thread_pool_->n_threads() / 4, 1u))
+    for (auto tile = 0; tile < n_tiles; ++tile) {
+        const auto tile_idx_y = tile / n_tiles_x;
+        const auto tile_idx_x = tile % n_tiles_x;
 
-                    const auto region_start = static_cast<long long>(
-                      bytes_per_px * (frame_row * frame_cols + frame_col));
-                    const auto nbytes =
-                      static_cast<long long>(region_width * bytes_per_px);
-                    const auto region_stop = region_start + nbytes;
-                    if (region_stop > data.size()) {
-                        LOG_ERROR("Buffer overflow");
-                        return bytes_written;
-                    }
+        const auto chunk_idx =
+          group_offset + tile_idx_y * n_tiles_x + tile_idx_x;
+        const auto chunk_start = get_chunk_data_(chunk_idx);
+        auto chunk_pos = chunk_offset;
 
-                    // copy region
-                    if (nbytes > std::distance(chunk_ptr, chunk_end)) {
-                        LOG_ERROR("Buffer overflow");
-                        return bytes_written;
-                    }
-                    std::copy(data.begin() + region_start,
-                              data.begin() + region_stop,
-                              chunk_ptr);
+        for (auto k = 0; k < tile_rows; ++k) {
+            const auto frame_row = tile_idx_y * tile_rows + k;
+            if (frame_row < frame_rows) {
+                const auto frame_col = tile_idx_x * tile_cols;
 
-                    bytes_written += (region_stop - region_start);
-                }
-                chunk_ptr += static_cast<long long>(bytes_per_row);
+                const auto region_width =
+                  std::min(frame_col + tile_cols, frame_cols) - frame_col;
+
+                const auto region_start =
+                  bytes_per_px * (frame_row * frame_cols + frame_col);
+                const auto nbytes = region_width * bytes_per_px;
+
+                // copy region
+                EXPECT(region_start + nbytes <= data_size,
+                       "Buffer overflow in framme. Region start: ",
+                       region_start,
+                       " nbytes: ",
+                       nbytes,
+                       " data size: ",
+                       data_size);
+                EXPECT(chunk_pos + nbytes <= bytes_per_chunk,
+                       "Buffer overflow in chunk. Chunk pos: ",
+                       chunk_pos,
+                       " nbytes: ",
+                       nbytes,
+                       " bytes per chunk: ",
+                       bytes_per_chunk);
+                memcpy(
+                  chunk_start + chunk_pos, data_ptr + region_start, nbytes);
+                bytes_written += nbytes;
             }
+            chunk_pos += bytes_per_row;
         }
     }
 

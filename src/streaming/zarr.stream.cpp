@@ -7,11 +7,16 @@
 #include "sink.hh"
 
 #include <blosc.h>
+#include <omp.h>
 
 #include <filesystem>
 
 #ifdef min
 #undef min
+#endif
+
+#ifdef max
+#undef max
 #endif
 
 namespace fs = std::filesystem;
@@ -373,22 +378,7 @@ ZarrStream::ZarrStream_s(struct ZarrStreamSettings_s* settings)
 
     commit_settings_(settings);
 
-    // spin up thread pool
-    unsigned int max_threads = settings->max_threads;
-    const auto hardware_concurrency = std::thread::hardware_concurrency();
-
-    if (max_threads == 0) {
-        if (hardware_concurrency > 0) {
-            LOG_DEBUG("Using ", hardware_concurrency, " threads");
-            max_threads = hardware_concurrency;
-        } else {
-            LOG_WARNING(
-              "Unable to determine hardware concurrency, using 1 thread");
-            max_threads = 1;
-        }
-    }
-    thread_pool_ = std::make_shared<zarr::ThreadPool>(
-      max_threads, [this](const std::string& err) { this->set_error_(err); });
+    start_thread_pool_(settings->max_threads);
 
     // allocate a frame buffer
     frame_buffer_.resize(
@@ -529,6 +519,20 @@ ZarrStream_s::commit_settings_(const struct ZarrStreamSettings_s* settings)
     dimensions_ = std::make_shared<ArrayDimensions>(std::move(dims), dtype_);
 
     multiscale_ = settings->multiscale;
+}
+
+void
+ZarrStream_s::start_thread_pool_(uint32_t max_threads)
+{
+    max_threads =
+      max_threads == 0 ? std::thread::hardware_concurrency() : max_threads;
+    if (max_threads == 0) {
+        LOG_WARNING("Unable to determine hardware concurrency, using 1 thread");
+        max_threads = 1;
+    }
+
+    thread_pool_ = std::make_shared<zarr::ThreadPool>(
+      max_threads, [this](const std::string& err) { this->set_error_(err); });
 }
 
 void
@@ -791,7 +795,7 @@ ZarrStream_s::write_external_metadata_()
                 s3_settings_->bucket_name, sink_path, s3_connection_pool_));
         } else {
             metadata_sinks_.emplace(metadata_key,
-                                    zarr::make_file_sink(sink_path, true));
+                                    zarr::make_file_sink(sink_path));
         }
     }
 
