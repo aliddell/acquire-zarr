@@ -393,7 +393,16 @@ class PyZarrStream
             throw py::error_already_set();
         }
 
-        auto buf = image_data.request();
+        // Create a contiguous copy, but only if needed
+        py::array contiguous_data;
+        if (!(image_data.flags() & py::array::c_style)) {
+            py::module np = py::module::import("numpy");
+            contiguous_data = np.attr("ascontiguousarray")(image_data);
+        } else {
+            contiguous_data = image_data;
+        }
+
+        auto buf = contiguous_data.request();
         auto* ptr = (uint8_t*)buf.ptr;
 
         py::gil_scoped_release release;
