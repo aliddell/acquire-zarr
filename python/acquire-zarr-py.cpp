@@ -109,6 +109,8 @@ log_level_to_str(ZarrLogLevel level)
             return "UNKNOWN";
     }
 }
+
+py::module np;
 } // namespace
 
 class PyZarrS3Settings
@@ -393,14 +395,9 @@ class PyZarrStream
             throw py::error_already_set();
         }
 
-        // Create a contiguous copy, but only if needed
-        py::array contiguous_data;
-        if (!(image_data.flags() & py::array::c_style)) {
-            py::module np = py::module::import("numpy");
-            contiguous_data = np.attr("ascontiguousarray")(image_data);
-        } else {
-            contiguous_data = image_data;
-        }
+        // Creates a contiguous copy, but only if not already contiguous
+        // https://numpy.org/doc/2.1/reference/generated/numpy.ascontiguousarray.html
+        py::array contiguous_data = np.attr("ascontiguousarray")(image_data);
 
         auto buf = contiguous_data.request();
         auto* ptr = (uint8_t*)buf.ptr;
@@ -467,6 +464,8 @@ class PyZarrStream
 
 PYBIND11_MODULE(acquire_zarr, m)
 {
+    np = py::module::import("numpy");
+
     py::options options;
     options.disable_user_defined_docstrings();
     options.disable_function_signatures();
