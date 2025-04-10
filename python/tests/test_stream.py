@@ -502,3 +502,75 @@ def test_write_custom_metadata(
     else:  # the originally written metadata is preserved
         assert data["foo"] == "bar"
         assert "baz" not in data
+
+
+def test_write_transposed_array(
+        store_path: Path,
+):
+    settings = StreamSettings(
+        dimensions=[
+            Dimension(
+                name="t",
+                kind=DimensionType.TIME,
+                array_size_px=2,
+                chunk_size_px=2,
+                shard_size_chunks=1,
+            ),
+            Dimension(
+                name="c",
+                kind=DimensionType.CHANNEL,
+                array_size_px=1,
+                chunk_size_px=1,
+                shard_size_chunks=1,
+            ),
+            Dimension(
+                name="z",
+                kind=DimensionType.SPACE,
+                array_size_px=40,
+                chunk_size_px=20,
+                shard_size_chunks=1,
+            ),
+            Dimension(
+                name="y",
+                kind=DimensionType.SPACE,
+                array_size_px=30,
+                chunk_size_px=15,
+                shard_size_chunks=1,
+            ),
+            Dimension(
+                name="x",
+                kind=DimensionType.SPACE,
+                array_size_px=20,
+                chunk_size_px=10,
+                shard_size_chunks=1,
+            ),
+        ]
+    )
+    settings.store_path = str(store_path / "test.zarr")
+    settings.version = ZarrVersion.V3
+
+    stream = ZarrStream(settings)
+    assert stream
+
+    data = np.random.randint(
+        0,
+        255,
+        (
+            settings.dimensions[0].chunk_size_px,
+            settings.dimensions[1].array_size_px,
+            settings.dimensions[2].array_size_px,
+            settings.dimensions[4].array_size_px,
+            settings.dimensions[3].array_size_px,
+        ),
+        dtype=np.uint8,
+    )
+    data = np.transpose(data, (0, 1, 2, 4, 3))
+
+    stream.append(data)
+
+    del stream  # close the stream, flush the files
+
+    group = zarr.open(settings.store_path, mode="r")
+    array = group["0"]
+
+    np.testing.assert_array_equal(data, array)
