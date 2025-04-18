@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-04-18
+
+### Added
+- Python benchmark comparing acquire-zarr to TensorStore performance (#80)
+
+### Changed
+- Metadata may be set at any point during streaming (#74)
+- Hide flush latency with a frame queue (#75)
+- Make `StreamSettings.dimensions` behave more like a Python list (#81)
+- Require S3 credentials in environment variables (#97)
+- Downsampling may be done in 2d or 3d depending on the third dimension (#88)
+
+### Fixed
+- Transposed Python arrays can be `append`ed as is (#90)
+
 ## [0.2.4] - 2025-03-25
 
 ### Fixed
