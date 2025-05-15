@@ -54,12 +54,12 @@ zarr::S3Connection::S3Connection(const S3Settings& settings)
 
 zarr::S3Connection::~S3Connection() = default;
 
-bool 
+bool
 zarr::S3Connection::is_connection_valid()
 {
     auto response = impl_->client->ListBuckets();
-    if (response.error) {
-        LOG_ERROR("Failed to validate S3 connection: ", response.error.String());
+    if (response.Error()) {
+        LOG_ERROR("Failed to validate S3 connection: ", response.Error().String());
         return false;
     }
     return true;
