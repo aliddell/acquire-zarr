@@ -20,7 +20,8 @@ struct GroupConfig : public ZarrNodeConfig
                 std::optional<BloscCompressionParams> compression_params,
                 std::shared_ptr<ArrayDimensions> dimensions,
                 ZarrDataType dtype,
-                bool multiscale)
+                bool multiscale,
+                ZarrDownsamplingMethod downsampling_method)
       : ZarrNodeConfig(store_root,
                        group_key,
                        bucket_name,
@@ -28,10 +29,12 @@ struct GroupConfig : public ZarrNodeConfig
                        dimensions,
                        dtype)
       , multiscale(multiscale)
+      , downsampling_method(downsampling_method)
     {
     }
 
     bool multiscale{ false };
+    ZarrDownsamplingMethod downsampling_method{ ZarrDownsamplingMethod_Mean };
 };
 
 class Group : public ZarrNode

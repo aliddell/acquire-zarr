@@ -547,6 +547,12 @@ ZarrStream_s::validate_settings_(const struct ZarrStreamSettings_s* settings)
         }
     }
 
+    if (settings->downsampling_method >= ZarrDownsamplingMethodCount) {
+        error_ = "Invalid downsampling method: " +
+                 std::to_string(settings->downsampling_method);
+        return false;
+    }
+
     return true;
 }
 
@@ -582,13 +588,15 @@ ZarrStream_s::commit_settings_(const struct ZarrStreamSettings_s* settings)
     }
 
     // configure root group
-    auto config = std::make_shared<zarr::GroupConfig>(store_path_,
-                                                      "", // root group
-                                                      bucket_name,
-                                                      compression_settings,
-                                                      dims,
-                                                      settings->data_type,
-                                                      settings->multiscale);
+    auto config =
+      std::make_shared<zarr::GroupConfig>(store_path_,
+                                          "", // root group
+                                          bucket_name,
+                                          compression_settings,
+                                          dims,
+                                          settings->data_type,
+                                          settings->multiscale,
+                                          settings->downsampling_method);
 
     try {
         if (version_ == ZarrVersion_2) {
@@ -781,7 +789,8 @@ ZarrStream_s::finalize_frame_queue_()
 
     // Wait for frame processing to complete
     std::unique_lock lock(frame_queue_mutex_);
-    frame_queue_finished_cv_.wait(lock, [this] { return frame_queue_->empty(); });
+    frame_queue_finished_cv_.wait(lock,
+                                  [this] { return frame_queue_->empty(); });
 }
 
 bool

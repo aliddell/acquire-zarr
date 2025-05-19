@@ -115,7 +115,8 @@ zarr::Group::create_downsampler_()
     const auto config = make_base_array_config_();
 
     try {
-        downsampler_ = zarr::Downsampler(config);
+        downsampler_ =
+          zarr::Downsampler(config, group_config_()->downsampling_method);
     } catch (const std::exception& exc) {
         LOG_ERROR("Error creating downsampler: " + std::string(exc.what()));
         return false;
