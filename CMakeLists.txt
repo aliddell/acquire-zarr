@@ -14,7 +14,7 @@ include(cmake/openmp.cmake)
 
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(blosc CONFIG REQUIRED)
-find_package(miniocpp CONFIG REQUIRED)
+#find_package(miniocpp CONFIG REQUIRED) # TODO (aliddell): uncomment when minio-cpp pushes a new release to vcpkg
 find_package(Crc32c CONFIG REQUIRED)
 find_package(OpenMP REQUIRED)
 
@@ -30,6 +30,8 @@ option(BUILD_BENCHMARK "Build benchmarks" OFF)
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     include(CTest)
 endif()
+
+add_subdirectory(minio-cpp)
 
 add_subdirectory(src)
 if (BUILD_TESTING)
