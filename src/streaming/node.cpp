@@ -16,6 +16,17 @@ zarr::ZarrNode::ZarrNode(std::shared_ptr<ZarrNodeConfig> config,
     CHECK(thread_pool_); // required
 }
 
+std::string
+zarr::ZarrNode::node_path_() const
+{
+    std::string key = config_->store_root;
+    if (!config_->node_key.empty()) {
+        key += "/" + config_->node_key;
+    }
+
+    return key;
+}
+
 bool
 zarr::ZarrNode::make_metadata_sinks_()
 {

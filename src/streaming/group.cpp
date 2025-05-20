@@ -61,17 +61,6 @@ zarr::Group::write_frame(ConstByteSpan data)
     return n_bytes;
 }
 
-std::string
-zarr::Group::node_path_() const
-{
-    std::string key = config_->store_root;
-    if (!config_->group_key.empty()) {
-        key += "/" + config_->group_key;
-    }
-
-    return key;
-}
-
 bool
 zarr::Group::close_()
 {
@@ -116,7 +105,7 @@ zarr::Group::create_downsampler_()
 
     try {
         downsampler_ =
-          zarr::Downsampler(config, group_config_()->downsampling_method);
+          Downsampler(config, group_config_()->downsampling_method);
     } catch (const std::exception& exc) {
         LOG_ERROR("Error creating downsampler: " + std::string(exc.what()));
         return false;
@@ -222,7 +211,7 @@ std::shared_ptr<zarr::ArrayConfig>
 zarr::Group::make_base_array_config_() const
 {
     return std::make_shared<ArrayConfig>(config_->store_root,
-                                         config_->group_key,
+                                         config_->node_key + "/0",
                                          config_->bucket_name,
                                          config_->compression_params,
                                          config_->dimensions,

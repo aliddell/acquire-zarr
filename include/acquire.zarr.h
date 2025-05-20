@@ -34,6 +34,8 @@ extern "C"
         ZarrVersion version; /**< The version of the Zarr format to use. 2 or 3. */
         unsigned int max_threads; /**< The maximum number of threads to use in the stream. Set to 0 to use the supported number of concurrent threads. */
         ZarrDownsamplingMethod downsampling_method; /**< The downsampling method to use for multiscale streaming. */
+        const char* output_key; /**< The key in the Zarr dataset where the streamed data should go. */
+        bool overwrite; /**< Remove everything in store_path if true. */
     } ZarrStreamSettings;
 
     typedef struct ZarrStream_s ZarrStream;
