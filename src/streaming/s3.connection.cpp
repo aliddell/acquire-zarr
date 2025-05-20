@@ -53,7 +53,6 @@ zarr::S3Connection::S3Connection(const S3Settings& settings)
       std::make_unique<minio::creds::ChainedProvider>(impl_->providers);
     impl_->client =
       std::make_unique<minio::s3::Client>(url, impl_->provider.get());
-    impl_->client->Debug(true);
 
     CHECK(impl_->client);
 }
