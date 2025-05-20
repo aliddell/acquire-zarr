@@ -272,6 +272,15 @@ class PyZarrStreamSettings
         max_threads_ = max_threads;
     }
 
+    ZarrDownsamplingMethod downsampling_method() const
+    {
+        return downsampling_method_;
+    }
+    void set_downsampling_method(ZarrDownsamplingMethod method)
+    {
+        downsampling_method_ = method;
+    }
+
     const std::vector<PyZarrDimensionProperties>& dimensions() const
     {
         return dimensions_;
@@ -283,17 +292,28 @@ class PyZarrStreamSettings
         dimensions_ = dimensions;
     }
 
+    const std::string& output_key() const { return output_key_; }
+    void set_output_key(const std::string& key) { output_key_ = key; }
+
+    bool overwrite() const { return overwrite_; }
+    void set_overwrite(bool overwrite) { overwrite_ = overwrite; }
+
   private:
     std::string store_path_;
     std::optional<PyZarrS3Settings> s3_settings_{ std::nullopt };
     std::optional<PyZarrCompressionSettings> compression_settings_{
         std::nullopt
     };
-    bool multiscale_ = false;
+    bool multiscale_{ false };
     ZarrDataType data_type_{ ZarrDataType_uint8 };
     ZarrVersion version_{ ZarrVersion_2 };
     unsigned int max_threads_{ std::thread::hardware_concurrency() };
     std::vector<PyZarrDimensionProperties> dimensions_;
+    ZarrDownsamplingMethod downsampling_method_{
+        ZarrDownsamplingMethod_Decimate
+    };
+    std::string output_key_;
+    bool overwrite_{ false };
 };
 
 class PyZarrStream
@@ -314,10 +334,15 @@ class PyZarrStream
             .data_type = settings.data_type(),
             .version = settings.version(),
             .max_threads = settings.max_threads(),
+            .downsampling_method = settings.downsampling_method(),
+            .overwrite = settings.overwrite(),
         };
 
         store_path_ = settings.store_path();
         stream_settings.store_path = store_path_.c_str();
+
+        output_key_ = settings.output_key();
+        stream_settings.output_key = output_key_.c_str();
 
         if (settings.s3().has_value()) {
             const auto& s3 = settings.s3().value();
@@ -521,6 +546,7 @@ class PyZarrStream
     ZarrStreamPtr stream_;
 
     std::string store_path_;
+    std::string output_key_;
 
     std::vector<std::string> dimension_names_;
     std::vector<std::string> dimension_units_;
@@ -587,6 +613,12 @@ PYBIND11_MODULE(acquire_zarr, m)
              ZarrDimensionType_Time)
       .value(dimension_type_to_str(ZarrDimensionType_Other),
              ZarrDimensionType_Other);
+
+    py::enum_<ZarrDownsamplingMethod>(m, "DownsamplingMethod")
+      .value("DECIMATE", ZarrDownsamplingMethod_Decimate)
+      .value("MEAN", ZarrDownsamplingMethod_Mean)
+      .value("MIN", ZarrDownsamplingMethod_Min)
+      .value("MAX", ZarrDownsamplingMethod_Max);
 
     py::enum_<ZarrLogLevel>(m, "LogLevel")
       .value(log_level_to_str(ZarrLogLevel_Debug), ZarrLogLevel_Debug)
@@ -729,6 +761,20 @@ PYBIND11_MODULE(acquire_zarr, m)
           if (kwargs.contains("version"))
               settings.set_version(kwargs["version"].cast<ZarrVersion>());
 
+          if (kwargs.contains("max_threads"))
+              settings.set_max_threads(
+                kwargs["max_threads"].cast<unsigned int>());
+
+          if (kwargs.contains("downsampling_method"))
+              settings.set_downsampling_method(
+                kwargs["downsampling_method"].cast<ZarrDownsamplingMethod>());
+
+          if (kwargs.contains("output_key"))
+              settings.set_output_key(kwargs["output_key"].cast<std::string>());
+
+          if (kwargs.contains("overwrite"))
+              settings.set_overwrite(kwargs["overwrite"].cast<bool>());
+
           return settings;
       }))
       .def("__repr__",
@@ -818,7 +864,16 @@ PYBIND11_MODULE(acquire_zarr, m)
                     &PyZarrStreamSettings::set_version)
       .def_property("max_threads",
                     &PyZarrStreamSettings::max_threads,
-                    &PyZarrStreamSettings::set_max_threads);
+                    &PyZarrStreamSettings::set_max_threads)
+      .def_property("downsampling_method",
+                    &PyZarrStreamSettings::downsampling_method,
+                    &PyZarrStreamSettings::set_downsampling_method)
+      .def_property("output_key",
+                    &PyZarrStreamSettings::output_key,
+                    &PyZarrStreamSettings::set_output_key)
+      .def_property("overwrite",
+                    &PyZarrStreamSettings::overwrite,
+                    &PyZarrStreamSettings::set_overwrite);
 
     py::class_<PyZarrStream>(m, "ZarrStream")
       .def(py::init<PyZarrStreamSettings>())

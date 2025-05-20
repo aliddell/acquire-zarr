@@ -14,6 +14,7 @@ import zarr
 from numcodecs import blosc as ncblosc
 from zarr.codecs import blosc as zblosc
 import s3fs
+from skimage.transform import downscale_local_mean
 
 dotenv.load_dotenv()
 
@@ -29,6 +30,7 @@ from acquire_zarr import (
     ZarrVersion,
     DataType,
     LogLevel,
+    DownsamplingMethod,
     set_log_level,
     get_log_level,
 )
@@ -713,3 +715,252 @@ def test_custom_dimension_units_and_scales(store_path: Path):
     assert z_scale == 0.1
     assert y_scale == 0.9
     assert x_scale == 1.1
+
+
+@pytest.mark.parametrize(("method",),
+                         [(DownsamplingMethod.MEAN,), (DownsamplingMethod.MIN,), (DownsamplingMethod.MAX,)])
+def test_2d_multiscale_stream(store_path: Path, method: DownsamplingMethod):
+    settings = StreamSettings(
+        dimensions=[
+            Dimension(
+                name="t",
+                kind=DimensionType.TIME,
+                array_size_px=50,
+                chunk_size_px=50,
+                shard_size_chunks=1,
+            ),
+            Dimension(
+                name="y",
+                kind=DimensionType.SPACE,
+                array_size_px=48,
+                chunk_size_px=24,
+                shard_size_chunks=1,
+            ),
+            Dimension(
+                name="x",
+                kind=DimensionType.SPACE,
+                array_size_px=64,
+                chunk_size_px=32,
+                shard_size_chunks=1,
+            ),
+        ]
+    )
+    settings.store_path = str(store_path / "test.zarr")
+    settings.version = ZarrVersion.V3
+    settings.data_type = DataType.INT32
+    settings.multiscale = True
+    settings.downsampling_method = method
+
+    data = np.random.randint(
+        -2 ** 16,
+        2 ** 16 - 1,
+        (
+            settings.dimensions[0].array_size_px,
+            settings.dimensions[1].array_size_px,
+            settings.dimensions[2].array_size_px,
+        ),
+        dtype=np.int32,
+    )
+
+    stream = ZarrStream(settings)
+    assert stream
+
+    stream.append(data)
+
+    del stream
+
+    group = zarr.open(settings.store_path, mode="r")
+    assert "0" in group
+
+    full_res = group["0"]
+    assert data.shape == full_res.shape
+    np.testing.assert_array_equal(data, full_res)
+
+    assert "1" in group
+    downsampled = group["1"]
+    assert downsampled.shape == (50, 24, 32)
+
+    expected = np.zeros((downsampled.shape[1], downsampled.shape[2]), dtype=data.dtype)
+    if method == DownsamplingMethod.MEAN:
+        for plane in range(downsampled.shape[0]):
+            expected = downscale_local_mean(data[plane, :, :], (2, 2)).astype(data.dtype)
+            actual = downsampled[plane, :, :]
+
+            np.testing.assert_array_equal(actual, expected)
+    elif method == DownsamplingMethod.MIN:
+        for plane in range(downsampled.shape[0]):
+            actual = downsampled[plane, :, :]
+
+            for row in range(0, data.shape[1], 2):
+                for col in range(0, data.shape[2], 2):
+                    expected[row // 2, col // 2] = np.min(
+                        data[plane, row:row + 2, col:col + 2]
+                    )
+
+            np.testing.assert_array_equal(actual, expected)
+    elif method == DownsamplingMethod.MAX:
+        for plane in range(downsampled.shape[0]):
+            for row in range(0, data.shape[1], 2):
+                for col in range(0, data.shape[2], 2):
+                    expected[row // 2, col // 2] = np.max(
+                        data[plane, row:row + 2, col:col + 2]
+                    )
+
+            np.testing.assert_array_equal(downsampled[plane, :, :], expected)
+
+
+@pytest.mark.parametrize(("method",),
+                         [(DownsamplingMethod.MEAN,), (DownsamplingMethod.MIN,), (DownsamplingMethod.MAX,)])
+def test_3d_multiscale_stream(store_path: Path, method: DownsamplingMethod):
+    settings = StreamSettings(
+        dimensions=[
+            Dimension(
+                name="z",
+                kind=DimensionType.SPACE,
+                array_size_px=100,
+                chunk_size_px=50,
+                shard_size_chunks=1,
+            ),
+            Dimension(
+                name="y",
+                kind=DimensionType.SPACE,
+                array_size_px=48,
+                chunk_size_px=24,
+                shard_size_chunks=1,
+            ),
+            Dimension(
+                name="x",
+                kind=DimensionType.SPACE,
+                array_size_px=64,
+                chunk_size_px=32,
+                shard_size_chunks=1,
+            ),
+        ]
+    )
+    settings.store_path = str(store_path / "test.zarr")
+    settings.version = ZarrVersion.V3
+    settings.data_type = DataType.UINT16
+    settings.multiscale = True
+    settings.downsampling_method = method
+
+    data = np.random.randint(
+        0,
+        2 ** 16 - 1,
+        (
+            settings.dimensions[0].array_size_px,
+            settings.dimensions[1].array_size_px,
+            settings.dimensions[2].array_size_px,
+        ),
+        dtype=np.uint16,
+    )
+
+    stream = ZarrStream(settings)
+    assert stream
+
+    stream.append(data)
+
+    del stream
+
+    group = zarr.open(settings.store_path, mode="r")
+    assert "0" in group
+
+    full_res = group["0"]
+    assert data.shape == full_res.shape
+    np.testing.assert_array_equal(data, full_res)
+
+    assert "1" in group
+    downsampled = group["1"]
+    assert downsampled.shape == (50, 24, 32)
+
+    expected = np.zeros((downsampled.shape[1], downsampled.shape[2]), dtype=data.dtype)
+    if method == DownsamplingMethod.MEAN:
+        for plane in range(downsampled.shape[0]):
+            actual = downsampled[plane, :, :]
+
+            expected = downscale_local_mean(data[(2 * plane): 2 * (plane + 1), :, :], (2, 2, 2)).astype(
+                data.dtype).squeeze()
+
+            np.testing.assert_allclose(actual, expected, atol=1)  # we may round slightly differently than skimage
+    elif method == DownsamplingMethod.MIN:
+        for plane in range(downsampled.shape[0]):
+            actual = downsampled[plane, :, :]
+
+            for row in range(0, data.shape[1], 2):
+                for col in range(0, data.shape[2], 2):
+                    expected[row // 2, col // 2] = np.min(
+                        data[(2 * plane):2 * (plane + 1), row:row + 2, col:col + 2]
+                    )
+
+            np.testing.assert_array_equal(actual, expected)
+    elif method == DownsamplingMethod.MAX:
+        for plane in range(downsampled.shape[0]):
+            actual = downsampled[plane, :, :]
+
+            for row in range(0, data.shape[1], 2):
+                for col in range(0, data.shape[2], 2):
+                    expected[row // 2, col // 2] = np.max(
+                        data[(2 * plane):2 * (plane + 1), row:row + 2, col:col + 2]
+                    )
+
+            np.testing.assert_array_equal(actual, expected)
+
+
+@pytest.mark.parametrize(("output_key", "multiscale"),
+                         [
+                             ("labels", False),
+                             ("path/to/data", False),
+                             ("a/nested/multiscale/group", True),
+                         ])
+def test_stream_data_to_named_array(
+        settings: StreamSettings,
+        store_path: Path,
+        request: pytest.FixtureRequest,
+        output_key: str,
+        multiscale: bool,
+):
+    settings.store_path = str(store_path / f"stream_to_named_array_{output_key.replace('/', '_')}.zarr")
+    settings.version = ZarrVersion.V3
+    settings.output_key = output_key
+    settings.multiscale = multiscale
+    settings.data_type = DataType.UINT16
+
+    stream = ZarrStream(settings)
+    assert stream
+
+    # Create test data
+    data = np.zeros(
+        (
+            2 * settings.dimensions[0].chunk_size_px,
+            settings.dimensions[1].array_size_px,
+            settings.dimensions[2].array_size_px,
+        ),
+        dtype=np.uint16,
+    )
+    # Fill with recognizable pattern
+    for i in range(data.shape[0]):
+        data[i, :, :] = i + 1
+
+    stream.append(data)
+
+    del stream  # close the stream, flush the files
+
+    # Now verify the data is stored in the expected location
+    store_path_obj = Path(settings.store_path)
+    assert store_path_obj.is_dir()
+
+    # Open the Zarr group and navigate to the correct path
+    root_group = zarr.open(settings.store_path, mode="r")
+
+    # Navigate through the path to get to the array
+    current_group = root_group
+    path_parts = output_key.split('/')
+
+    for part in path_parts:
+        assert part in current_group, f"Path part '{part}' not found in group"
+        current_group = current_group[part]
+
+    array = current_group["0"] if multiscale else current_group
+
+    # Verify array shape and contents
+    assert array.shape == data.shape
+    assert np.array_equal(array, data)
