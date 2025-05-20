@@ -31,7 +31,17 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     include(CTest)
 endif()
 
+if(MSVC)
+    # Save the original value to restore later if needed
+    set(ORIG_MSVC_RUNTIME_LIBRARY ${CMAKE_MSVC_RUNTIME_LIBRARY})
+
+    # Set to static runtime library
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 add_subdirectory(minio-cpp)
+if(MSVC AND DEFINED ORIG_MSVC_RUNTIME_LIBRARY)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY ${ORIG_MSVC_RUNTIME_LIBRARY})
+endif()
 
 add_subdirectory(src)
 if (BUILD_TESTING)
