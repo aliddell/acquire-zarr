@@ -238,10 +238,26 @@ When set to `false`, the stream will use the existing directory if it exists, or
 
 ### S3
 
-The library supports writing directly to S3-compatible storage. Configuration requires specifying the endpoint, bucket
+The library supports writing directly to S3-compatible storage.
+We authenticate with S3 through environment variables or an AWS credentials file.
+If you are using environment variables, set the following:
+
+- `AWS_ACCESS_KEY_ID`: Your AWS access key
+- `AWS_SECRET_ACCESS_KEY`: Your AWS secret key
+- `AWS_SESSION_TOKEN`: Optional session token for temporary credentials
+
+These must be set in the environment where your application runs.
+
+**Important Note:** You should ensure these environment variables are set *before* running your application or importing
+the library or Python module.
+They will not be available if set after the library is loaded.
+Configuration requires specifying the endpoint, bucket
 name, and region:
 
 ```c
+// ensure your environment is set up for S3 access before running your program
+#include <acquire.zarr.h>
+
 ZarrStreamSettings settings = { /* ... */ };
 
 // Configure S3 storage
@@ -257,6 +273,7 @@ settings.s3_settings = &s3_settings;
 In Python, S3 configuration looks like:
 
 ```python
+# ensure your environment is set up for S3 access before importing acquire_zarr
 import acquire_zarr as aqz
 
 settings = aqz.StreamSettings()
@@ -272,13 +289,6 @@ s3_settings = aqz.S3Settings(
 # Apply S3 settings to your stream configuration
 settings.s3 = s3_settings
 ```
-
-The library authenticates with S3 exclusively through environment variables:
-
-- `AWS_ACCESS_KEY_ID`: Your AWS access key
-- `AWS_SECRET_ACCESS_KEY`: Your AWS secret key
-
-These must be set in the environment where your application runs.
 
 ### Anaconda GLIBCXX issue
 

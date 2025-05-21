@@ -19,7 +19,7 @@ main()
 
     // Configure S3
     // Ensure that you have set your S3 credentials in the environment variables
-    // AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+    // AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and optionally AWS_SESSION_TOKEN
     ZarrS3Settings s3 = {
         .endpoint = "http://localhost:9000",
         .bucket_name = "mybucket",

@@ -14,7 +14,7 @@ include(cmake/openmp.cmake)
 
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(blosc CONFIG REQUIRED)
-find_package(miniocpp CONFIG REQUIRED)
+#find_package(miniocpp CONFIG REQUIRED) # TODO (aliddell): uncomment when minio-cpp pushes a new release to vcpkg
 find_package(Crc32c CONFIG REQUIRED)
 find_package(OpenMP REQUIRED)
 
@@ -29,6 +29,18 @@ option(BUILD_BENCHMARK "Build benchmarks" OFF)
 
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     include(CTest)
+endif()
+
+if(MSVC)
+    # Save the original value to restore later if needed
+    set(ORIG_MSVC_RUNTIME_LIBRARY ${CMAKE_MSVC_RUNTIME_LIBRARY})
+
+    # Set to static runtime library
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+add_subdirectory(minio-cpp)
+if(MSVC AND DEFINED ORIG_MSVC_RUNTIME_LIBRARY)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY ${ORIG_MSVC_RUNTIME_LIBRARY})
 endif()
 
 add_subdirectory(src)
