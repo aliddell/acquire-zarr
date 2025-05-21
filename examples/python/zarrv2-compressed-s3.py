@@ -1,5 +1,9 @@
 # Zarr V2 with ZSTD compression to S3
 import numpy as np
+
+# Ensure that you have set your S3 credentials in the environment variables
+# AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and optionally AWS_SESSION_TOKEN
+# BEFORE importing acquire_zarr
 from acquire_zarr import (
     StreamSettings, ZarrStream, Dimension, DimensionType, ZarrVersion,
     DataType, Compressor, CompressionCodec, CompressionSettings, S3Settings
@@ -20,8 +24,6 @@ def main():
     settings.s3 = S3Settings(
         endpoint="http://localhost:9000",
         bucket_name="mybucket",
-        access_key_id="myaccesskey",
-        secret_access_key="mysecretkey",
         region="us-east-2"
     )
 
