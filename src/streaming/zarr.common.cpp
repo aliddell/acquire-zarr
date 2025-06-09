@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <latch>
 #include <queue>
+#include <regex>
 #include <stdexcept>
 #include <unordered_set>
 
@@ -16,19 +17,9 @@ zarr::trim(std::string_view s)
         return {};
     }
 
-    // trim left
-    std::string trimmed(s);
-    trimmed.erase(trimmed.begin(),
-                  std::find_if(trimmed.begin(), trimmed.end(), [](char c) {
-                      return !std::isspace(c);
-                  }));
-
-    // trim right
-    trimmed.erase(std::find_if(trimmed.rbegin(),
-                               trimmed.rend(),
-                               [](char c) { return !std::isspace(c); })
-                    .base(),
-                  trimmed.end());
+    // remove leading and trailing whitespace and trailing slashes
+    std::string trimmed =
+      std::regex_replace(std::string(s), std::regex("^\\s+|\\s+$|\\/+$"), "");
 
     return trimmed;
 }
