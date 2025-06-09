@@ -1,6 +1,8 @@
 #include "downsampler.hh"
 #include "macros.hh"
 
+#include <fmt/format.h>
+
 #include <regex>
 
 namespace {
@@ -261,8 +263,8 @@ zarr::Downsampler::Downsampler(std::shared_ptr<ArrayConfig> config,
             average2_fun_ = average_two_frames<double>;
             break;
         default:
-            throw std::runtime_error("Invalid data type: " +
-                                     std::to_string(config->dtype));
+            throw std::runtime_error(fmt::format(
+              "Invalid data type: {}", static_cast<int>(config->dtype)));
     }
 
     EXPECT(method < ZarrDownsamplingMethodCount,
