@@ -419,8 +419,8 @@ zarr::Downsampler::downsampling_method() const
         case ZarrDownsamplingMethod_Max:
             return "local_max";
         default:
-            throw std::runtime_error("Invalid downsampling method: " +
-                                     std::to_string(method_));
+            throw std::runtime_error(fmt::format(
+              "Invalid downsampling method: {}", static_cast<int>(method_)));
     }
 }
 
@@ -464,8 +464,8 @@ zarr::Downsampler::get_metadata() const
             metadata["kwargs"] = { { "func", "np.max" } };
             break;
         default:
-            throw std::runtime_error("Invalid downsampling method: " +
-                                     std::to_string(method_));
+            throw std::runtime_error(fmt::format(
+              "Invalid downsampling method: {}", static_cast<int>(method_)));
     }
 
     return metadata;

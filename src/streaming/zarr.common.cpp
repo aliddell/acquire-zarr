@@ -1,6 +1,8 @@
 #include "macros.hh"
 #include "zarr.common.hh"
 
+#include <fmt/format.h>
+
 #include <filesystem>
 #include <latch>
 #include <queue>
@@ -54,8 +56,8 @@ zarr::bytes_of_type(ZarrDataType data_type)
         case ZarrDataType_float64:
             return 8;
         default:
-            throw std::invalid_argument("Invalid data type: " +
-                                        std::to_string(data_type));
+            throw std::invalid_argument(fmt::format("Invalid data type: {}",
+                                        static_cast<int>(data_type)));
     }
 }
 
