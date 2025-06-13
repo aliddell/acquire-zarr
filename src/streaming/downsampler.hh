@@ -4,6 +4,8 @@
 #include "array.dimensions.hh"
 #include "array.hh"
 
+#include "nlohmann/json.hpp"
+
 #include <unordered_map>
 
 namespace zarr {
@@ -35,6 +37,9 @@ class Downsampler
     const std::unordered_map<int, std::shared_ptr<zarr::ArrayConfig>>&
     writer_configurations() const;
 
+    std::string downsampling_method() const;
+    nlohmann::json get_metadata() const;
+
   private:
     using ScaleFunT = std::function<
       ByteVector(ConstByteSpan, size_t&, size_t&, ZarrDownsamplingMethod)>;
@@ -51,11 +56,8 @@ class Downsampler
     std::unordered_map<int, ByteVector> downsampled_frames_;
     std::unordered_map<int, ByteVector> partial_scaled_frames_;
 
-    bool is_3d_downsample_() const;
     size_t n_levels_() const;
 
     void make_writer_configurations_(std::shared_ptr<ArrayConfig> config);
-    void downsample_3d_(ConstByteSpan frame_data);
-    void downsample_2d_(ConstByteSpan frame_data);
 };
 } // namespace zarr
