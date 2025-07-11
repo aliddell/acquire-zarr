@@ -212,7 +212,7 @@ zarr::MultiscaleArray::write_multiscale_frames_(LockedBuffer& data)
 
     for (auto i = 1; i < arrays_.size(); ++i) {
         LockedBuffer downsampled_frame;
-        if (downsampler_->get_downsampled_frame(i, downsampled_frame)) {
+        if (downsampler_->take_frame(i, downsampled_frame)) {
             const auto n_bytes = arrays_[i]->write_frame(downsampled_frame);
             EXPECT(n_bytes == downsampled_frame.size(),
                    "Expected to write ",

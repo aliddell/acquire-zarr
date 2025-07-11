@@ -18,7 +18,7 @@ class Downsampler
     /**
      * @brief Add a full-resolution frame to the downsampler.
      * @note Downsampled frames are cached internally and can be retrieved, per
-     * level, by calling get_downsampled_frame().
+     * level, by calling take_frame().
      * @param frame The full-resolution frame data.
      */
     void add_frame(LockedBuffer& frame);
@@ -32,7 +32,7 @@ class Downsampler
      * @param[out] frame_data The downsampled frame data.
      * @return True if the downsampled frame was found, false otherwise.
      */
-    bool get_downsampled_frame(int level, LockedBuffer& frame_data);
+    bool take_frame(int level, LockedBuffer& frame_data);
 
     const std::unordered_map<int, std::shared_ptr<zarr::ArrayConfig>>&
     writer_configurations() const;
@@ -55,9 +55,11 @@ class Downsampler
       writer_configurations_;
     std::unordered_map<int, ByteVector> downsampled_frames_;
     std::unordered_map<int, ByteVector> partial_scaled_frames_;
+    std::unordered_map<int, uint32_t> level_frame_count_;
 
     size_t n_levels_() const;
 
     void make_writer_configurations_(std::shared_ptr<ArrayConfig> config);
+    void emplace_downsampled_frame_(int level, const ByteVector& frame_data);
 };
 } // namespace zarr
