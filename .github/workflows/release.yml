@@ -95,13 +95,11 @@ jobs:
           path: ${{github.workspace}}/*.zip
 
   build-wheel:
-    name: Build wheels for Python
+    name: Build Python ${{ matrix.py_version }} wheel on ${{ matrix.platform }}
     strategy:
       matrix:
         platform:
           - "windows-latest"
-          - "ubuntu-22.04"
-          - "ubuntu-22.04-arm"
           - "macos-latest" # arm
           - "macos-13" # x86_64
         python:
@@ -111,10 +109,16 @@ jobs:
           - "3.12"
           - "3.13.3"
         include:
-          - platform: "ubuntu-22.04"
-            arch: "x86_64"
-          - platform: "ubuntu-22.04-arm"
-            arch: "aarch64"
+          - python: "3.9"
+            py_version: "3.9"
+          - python: "3.10"
+            py_version: "3.10"
+          - python: "3.11"
+            py_version: "3.11"
+          - python: "3.12"
+            py_version: "3.12"
+          - python: "3.13.3"
+            py_version: "3.13" # without patch version
 
     runs-on: ${{ matrix.platform }}
 
@@ -149,24 +153,11 @@ jobs:
         run: |
           brew install libomp
 
-      - name: Install system dependencies
-        if: startsWith(matrix.platform, 'ubuntu')
-        run: |
-          sudo apt-get install patchelf
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 90
-          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 90
-
       - name: Install Python dependencies
         run: python -m pip install -U pip "pybind11[global]" "cmake<4.0.0" build numpy pytest auditwheel
 
       - name: Build
         run: python -m build -o dist
-
-      - name: Fix wheel for manylinux
-        if: startsWith(matrix.platform, 'ubuntu')
-        run: |
-          auditwheel repair dist/*.whl -w dist --plat manylinux_2_35_${{ matrix.arch }}
-          rm dist/*-linux_*.whl
 
       - name: Upload wheel
         uses: actions/upload-artifact@v4
@@ -174,10 +165,90 @@ jobs:
           name: ${{ matrix.platform }} ${{ matrix.python }} wheel
           path: ${{ github.workspace }}/dist
 
+  build-wheel-ubuntu:
+    name: Build Python ${{ matrix.py_version }} wheel on ${{ matrix.platform }}
+    strategy:
+      matrix:
+        platform:
+          - "ubuntu-22.04"
+          - "ubuntu-22.04-arm"
+        python:
+          - "3.9"
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13.3"
+        include:
+          - platform: "ubuntu-22.04"
+            arch: "x86_64"
+          - platform: "ubuntu-22.04-arm"
+            arch: "aarch64"
+          - python: "3.9"
+            py_version: "3.9"
+            py_short: "cp39"
+          - python: "3.10"
+            py_version: "3.10"
+            py_short: "cp310"
+          - python: "3.11"
+            py_version: "3.11"
+            py_short: "cp311"
+          - python: "3.12"
+            py_version: "3.12"
+            py_short: "cp312"
+          - python: "3.13.3"
+            py_version: "3.13" # without patch version
+            py_short: "cp313"
+
+    runs-on: ${{ matrix.platform }}
+
+    permissions:
+      actions: write
+
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.platform }}-${{ matrix.python }}-build-wheel
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Build
+        uses: pypa/cibuildwheel@v3.0.1
+        env:
+          CIBW_BUILD: ${{ matrix.py_short }}-*
+          CIBW_SKIP: "*-musllinux*"  # Skip musllinux builds
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+          CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
+          CIBW_BEFORE_BUILD: >-
+            yum install -y ninja-build gcc-toolset-11-gcc gcc-toolset-11-gcc-c++ perl-IPC-Cmd &&
+            source /opt/rh/gcc-toolset-11/enable &&
+            git clone https://github.com/microsoft/vcpkg.git -b 2025.03.19 &&
+            cd vcpkg && 
+            CMAKE_POLICY_VERSION_MINIMUM=3.5 ./bootstrap-vcpkg.sh &&
+            ./vcpkg integrate install
+          CIBW_ENVIRONMENT: >-
+            VCPKG_ROOT=/project/vcpkg
+            PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
+            CC=/opt/rh/gcc-toolset-11/root/usr/bin/gcc
+            CXX=/opt/rh/gcc-toolset-11/root/usr/bin/g++
+            Python3_EXECUTABLE=/opt/python/${{ matrix.py_short }}-${{ matrix.py_short }}/bin/python
+            Python3_INCLUDE_DIR=/opt/python/${{ matrix.py_short }}-${{ matrix.py_short }}/include/python${{ matrix.py_version }}
+            Python3_LIBRARY=/opt/python/${{ matrix.py_short }}-${{ matrix.py_short }}/lib/libpython${{ matrix.py_version }}.a
+        with:
+          output-dir: dist
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: Linux ${{ matrix.arch }} ${{ matrix.py_version }} wheel
+          path: ${{github.workspace}}/dist/*.whl
+
   release:
     needs:
       - build
       - build-wheel
+      - build-wheel-ubuntu
     name: "Release"
     runs-on: "ubuntu-latest"
 
