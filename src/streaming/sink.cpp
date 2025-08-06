@@ -2,11 +2,10 @@
 #include "file.sink.hh"
 #include "s3.sink.hh"
 #include "macros.hh"
-#include "zarr.common.hh"
 
 #include <algorithm>
 #include <filesystem>
-#include <latch>
+#include <future>
 #include <stdexcept>
 #include <unordered_set>
 
@@ -48,15 +47,17 @@ make_file_sinks(std::vector<std::string>& file_paths,
     const auto n_files = file_paths.size();
     sinks.resize(n_files);
     std::fill(sinks.begin(), sinks.end(), nullptr);
-    std::latch latch(n_files);
+    std::vector<std::future<void>> futures;
 
     for (auto i = 0; i < n_files; ++i) {
         const auto filename = file_paths[i];
-
         std::unique_ptr<zarr::Sink>* psink = sinks.data() + i;
 
-        auto job =
-          [filename, psink, &latch, &all_successful](std::string& err) -> bool {
+        auto promise = std::make_shared<std::promise<void>>();
+        futures.emplace_back(promise->get_future());
+
+        auto job = [filename,
+                    psink, promise, &all_successful](std::string& err) -> bool {
             bool success = false;
 
             try {
@@ -66,7 +67,7 @@ make_file_sinks(std::vector<std::string>& file_paths,
                 err = "Failed to create file '" + filename + "': " + exc.what();
             }
 
-            latch.count_down();
+            promise->set_value();
             all_successful.fetch_and(static_cast<char>(success));
 
             return success;
@@ -75,7 +76,7 @@ make_file_sinks(std::vector<std::string>& file_paths,
         // one thread is reserved for processing the frame queue and runs the
         // entire lifetime of the stream
         if (thread_pool->n_threads() == 1 ||
-            !thread_pool->push_job(std::move(job))) {
+            !thread_pool->push_job(job)) {
             std::string err;
             if (!job(err)) {
                 LOG_ERROR(err);
@@ -83,7 +84,9 @@ make_file_sinks(std::vector<std::string>& file_paths,
         }
     }
 
-    latch.wait();
+    for (auto& future : futures) {
+        future.wait();
+    }
 
     return (bool)all_successful;
 }
@@ -204,43 +207,55 @@ zarr::make_dirs(const std::vector<std::string>& dir_paths,
     EXPECT(thread_pool, "Thread pool not provided.");
 
     std::atomic<char> all_successful = 1;
-
     std::unordered_set<std::string> unique_paths(dir_paths.begin(),
                                                  dir_paths.end());
 
-    auto shared_latch = std::make_shared<std::latch>(unique_paths.size());
+    std::vector<std::future<void>> futures;
 
     for (const auto& path : unique_paths) {
-        auto job = [path, shared_latch, &all_successful](std::string& err) {
-            bool success = true;
-            if (fs::is_directory(path) || path.empty()) {
-                shared_latch->count_down();
-                return success;
-            }
+        auto promise = std::make_shared<std::promise<void>>();
+        futures.emplace_back(promise->get_future());
 
-            std::error_code ec;
-            if (!fs::create_directories(path, ec) && !fs::is_directory(path)) {
-                err = "Failed to create directory '" + path + "': " + ec.message();
+        auto job_impl = [path, promise, &all_successful](std::string& err) {
+            bool success = true;
+            try {
+                if (fs::is_directory(path) || path.empty()) {
+                    promise->set_value();
+                    return success;
+                }
+
+                std::error_code ec;
+                if (!fs::create_directories(path, ec) &&
+                    !fs::is_directory(path)) {
+                    err = "Failed to create directory '" + path +
+                          "': " + ec.message();
+                    success = false;
+                }
+            } catch (const std::exception& exc) {
+                err = "Failed to create directory '" + path +
+                      "': " + exc.what();
                 success = false;
             }
 
-            shared_latch->count_down();
+            promise->set_value();
             all_successful.fetch_and(static_cast<char>(success));
             return success;
         };
 
-        // one thread is reserved for processing the frame queue and runs the
-        // entire lifetime of the stream
         if (thread_pool->n_threads() == 1 ||
-            !thread_pool->push_job(std::move(job))) {
+            !thread_pool->push_job(job_impl)) {  // Copy, don't move
             std::string err;
-            if (!job(err)) {
+            if (!job_impl(err)) {  // Use the original, not moved-from version
                 LOG_ERROR(err);
             }
         }
     }
 
-    shared_latch->wait();
+    // wait for all jobs to finish
+    for (auto& future : futures) {
+        future.wait();
+    }
+
     return static_cast<bool>(all_successful);
 }
 
@@ -260,7 +275,8 @@ zarr::make_file_sink(std::string_view file_path)
 
     if (!fs::is_directory(parent_path)) {
         std::error_code ec;
-        if (!fs::create_directories(parent_path, ec)) {
+        if (!fs::create_directories(parent_path, ec) &&
+            !fs::is_directory(parent_path)) {
             LOG_ERROR(
               "Failed to create directory '", parent_path, "': ", ec.message());
             return nullptr;

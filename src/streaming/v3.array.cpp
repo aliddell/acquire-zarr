@@ -9,6 +9,7 @@
 #include <crc32c/crc32c.h>
 
 #include <algorithm> // std::fill
+#include <future>
 #include <semaphore>
 #include <stdexcept>
 
@@ -297,21 +298,16 @@ zarr::V3Array::compress_and_flush_data_()
 
     auto write_table = is_closing_ || should_rollover_();
 
-    // get count of chunks per shard to construct chunk latches
-    std::vector<uint32_t> chunks_per_shard(n_shards);
-    for (auto i = 0; i < chunks_in_memory; ++i) {
-        const auto chunk_idx = i + chunk_group_offset;
-        const auto shard_idx = dims->shard_index_for_chunk(chunk_idx);
-        ++chunks_per_shard[shard_idx];
-    }
-
-    auto chunk_latch = std::make_shared<std::latch>(chunks_in_memory);
+    std::vector<std::future<void>> futures;
 
     // queue jobs to compress all chunks
     const auto bytes_of_raw_chunk = config_->dimensions->bytes_per_chunk();
     const auto bytes_per_px = bytes_of_type(config_->dtype);
 
     for (auto i = 0; i < chunks_in_memory; ++i) {
+        auto promise = std::make_shared<std::promise<void>>();
+        futures.emplace_back(promise->get_future());
+
         const auto chunk_idx = i + chunk_group_offset;
         const auto shard_idx = dims->shard_index_for_chunk(chunk_idx);
         const auto internal_idx = dims->shard_internal_index(chunk_idx);
@@ -327,7 +323,7 @@ zarr::V3Array::compress_and_flush_data_()
                         shard_idx,
                         chunk_idx,
                         internal_idx,
-                        latch = chunk_latch,
+                        promise,
                         &all_successful](std::string& err) {
                 bool success = false;
 
@@ -347,7 +343,7 @@ zarr::V3Array::compress_and_flush_data_()
                     err = exc.what();
                 }
 
-                latch->count_down();
+                promise->set_value();
 
                 all_successful.fetch_and(static_cast<char>(success));
                 return success;
@@ -356,7 +352,7 @@ zarr::V3Array::compress_and_flush_data_()
             // one thread is reserved for processing the frame queue and runs
             // the entire lifetime of the stream
             if (thread_pool_->n_threads() == 1 ||
-                !thread_pool_->push_job(std::move(job))) {
+                !thread_pool_->push_job(job)) {
                 std::string err;
                 if (!job(err)) {
                     LOG_ERROR(err);
@@ -365,15 +361,17 @@ zarr::V3Array::compress_and_flush_data_()
         } else {
             // no compression, just update shard table with size
             shard_table->at(2 * internal_idx + 1) = bytes_of_raw_chunk;
-            chunk_latch->count_down();
         }
     }
 
-    chunk_latch->wait();
+    // if we're not compressing, there aren't any futures to wait for
+    for (auto& future : futures) {
+        future.wait();
+    }
+    futures.clear();
 
     const auto bucket_name = config_->bucket_name;
     auto connection_pool = s3_connection_pool_;
-    auto shard_latch = std::make_shared<std::latch>(n_shards);
 
     // wait for the chunks in each shard to finish compressing, then defragment
     // and write the shard
@@ -384,6 +382,9 @@ zarr::V3Array::compress_and_flush_data_()
         auto* file_offset = shard_file_offsets_.data() + shard_idx;
         auto* shard_table = shard_tables_.data() + shard_idx;
 
+        auto promise = std::make_shared<std::promise<void>>();
+        futures.emplace_back(promise->get_future());
+
         auto job = [shard_idx,
                     is_s3,
                     data_path,
@@ -392,7 +393,7 @@ zarr::V3Array::compress_and_flush_data_()
                     write_table,
                     bucket_name,
                     connection_pool,
-                    latch = shard_latch,
+                    promise,
                     &semaphore,
                     &all_successful,
                     this](std::string& err) {
@@ -413,7 +414,8 @@ zarr::V3Array::compress_and_flush_data_()
                 }
 
                 if (!sink && is_s3) { // S3 sink, not yet constructed
-                    sink = make_s3_sink(*bucket_name, data_path, connection_pool);
+                    sink =
+                      make_s3_sink(*bucket_name, data_path, connection_pool);
                 } else if (!is_s3) { // file sink
                     sink = make_file_sink(data_path);
                 }
@@ -436,24 +438,29 @@ zarr::V3Array::compress_and_flush_data_()
 
                             // compute crc32 checksum of the table
                             const uint32_t checksum = crc32c::Crc32c(
-                              reinterpret_cast<const uint8_t*>(table_ptr), table_size);
+                              reinterpret_cast<const uint8_t*>(table_ptr),
+                              table_size);
                             const auto* checksum_bytes =
                               reinterpret_cast<const uint8_t*>(&checksum);
 
-                            if (!sink->write(*file_offset, { table_ptr, table_size })) {
+                            if (!sink->write(*file_offset,
+                                             { table_ptr, table_size })) {
                                 err = "Failed to write table to shard " +
                                       std::to_string(shard_idx);
                                 success = false;
                             } else if (!sink->write(*file_offset + table_size,
-                                                    { checksum_bytes, sizeof(checksum) })) {
-                                err = "Failed to write table checksum to shard " +
-                                      std::to_string(shard_idx);
+                                                    { checksum_bytes,
+                                                      sizeof(checksum) })) {
+                                err =
+                                  "Failed to write table checksum to shard " +
+                                  std::to_string(shard_idx);
                                 success = false;
                             }
                         }
 
                         if (!is_s3 && !finalize_sink(std::move(sink))) {
-                            err = "Failed to finalize sink at path " + data_path;
+                            err =
+                              "Failed to finalize sink at path " + data_path;
                             success = false;
                         }
                     }
@@ -463,7 +470,7 @@ zarr::V3Array::compress_and_flush_data_()
                 success = false;
             }
 
-            // Cleanup and single point of latch countdown
+            // Cleanup and single point of promise resolution
             if (semaphore_acquired) {
                 semaphore.release();
             }
@@ -473,15 +480,14 @@ zarr::V3Array::compress_and_flush_data_()
             }
 
             all_successful.fetch_and(static_cast<char>(success));
-            latch->count_down();
+            promise->set_value();
 
             return success;
         };
 
         // one thread is reserved for processing the frame queue and runs the
         // entire lifetime of the stream
-        if (thread_pool_->n_threads() == 1 ||
-            !thread_pool_->push_job(std::move(job))) {
+        if (thread_pool_->n_threads() == 1 || !thread_pool_->push_job(job)) {
             std::string err;
             if (!job(err)) {
                 LOG_ERROR(err);
@@ -490,7 +496,9 @@ zarr::V3Array::compress_and_flush_data_()
     }
 
     // wait for all threads to finish
-    shard_latch->wait();
+    for (auto& future : futures) {
+        future.wait();
+    }
 
     // reset shard tables and file offsets
     if (write_table) {

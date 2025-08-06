@@ -7,7 +7,7 @@
 
 #include <nlohmann/json.hpp>
 
-#include <latch>
+#include <future>
 #include <semaphore>
 #include <stdexcept>
 
@@ -164,25 +164,30 @@ zarr::V2Array::compress_and_flush_data_()
     }
 
     std::atomic<char> all_successful = 1;
-    auto shared_latch = std::make_shared<std::latch>(n_chunks);  // ← Use shared_ptr
+    std::vector<std::future<void>> futures;
     std::counting_semaphore<MAX_CONCURRENT_FILES> semaphore(MAX_CONCURRENT_FILES);
 
     for (auto i = 0; i < n_chunks; ++i) {
-        auto job = [bytes_per_px,
-                    compression_params,
-                    is_s3,
-                    data_path = data_paths_[i],
-                    &chunk_buffer = chunk_buffers_[i],
-                    bucket_name,
-                    connection_pool,
-                    &semaphore,
-                    shared_latch,  // ← Capture by value (shared_ptr copy)
-                    &all_successful](std::string& err) {
-            bool success = false;
+        auto promise = std::make_shared<std::promise<void>>();
+        futures.emplace_back(promise->get_future());
+
+        auto job =
+          [bytes_per_px,
+           compression_params,
+           is_s3,
+           data_path = data_paths_[i],
+           chunk_buffer = std::move(chunk_buffers_[i].take()),
+           bucket_name,
+           connection_pool,
+           &semaphore,
+           promise,
+           &all_successful](std::string& err) mutable // chunk_buffer is mutable
+        {
+            bool success = true;
             bool semaphore_acquired = false;
 
             if (!all_successful) {
-                shared_latch->count_down();
+                promise->set_value();
                 err = "Other jobs in batch have failed, not proceeding";
                 return false;
             }
@@ -193,31 +198,33 @@ zarr::V2Array::compress_and_flush_data_()
                 semaphore_acquired = true;
 
                 // compress the chunk
-                if (compression_params &&
-                    !chunk_buffer.compress(*compression_params, bytes_per_px)) {
-                    err = "Failed to compress chunk at path " + data_path;
-                    success = false;
-                } else {
+                if (compression_params) {
+                    if (!(success = compress_in_place(
+                            chunk_buffer, *compression_params, bytes_per_px))) {
+                        err = "Failed to compress chunk at path " + data_path;
+                    }
+                }
+
+                if (success) {
                     if (is_s3) {
-                        sink = make_s3_sink(*bucket_name, data_path, connection_pool);
+                        sink = make_s3_sink(
+                          *bucket_name, data_path, connection_pool);
                     } else {
                         sink = make_file_sink(data_path);
                     }
+                }
 
-                    if (sink == nullptr) {
-                        err = "Failed to create sink for " + data_path;
+                if (success && sink == nullptr) {
+                    err = "Failed to create sink for " + data_path;
+                    success = false;
+                } else if (success) {
+                    // try to write the chunk to the sink
+                    if (!sink->write(0, chunk_buffer)) {
+                        err = "Failed to write chunk to " + data_path;
                         success = false;
-                    } else {
-                        // try to write the chunk to the sink
-                        success = chunk_buffer.with_lock(
-                          [&sink](const auto& buf) { return sink->write(0, buf); });
-
-                        if (!success) {
-                            err = "Failed to write chunk to " + data_path;
-                        } else if (!finalize_sink(std::move(sink))) {
-                            err = "Failed to finalize sink at path " + data_path;
-                            success = false;
-                        }
+                    } else if (!finalize_sink(std::move(sink))) {
+                        err = "Failed to finalize sink at path " + data_path;
+                        success = false;
                     }
                 }
             } catch (const std::exception& exc) {
@@ -231,15 +238,14 @@ zarr::V2Array::compress_and_flush_data_()
             }
 
             all_successful.fetch_and(static_cast<char>(success));
-            shared_latch->count_down();  // ← Single count_down call
+            promise->set_value();
 
             return success;
         };
-
         // one thread is reserved for processing the frame queue and runs the
         // entire lifetime of the stream
         if (thread_pool_->n_threads() == 1 ||
-            !thread_pool_->push_job(std::move(job))) {
+            !thread_pool_->push_job(job)) {
             std::string err;
             if (!job(err)) {
                 LOG_ERROR(err);
@@ -247,7 +253,11 @@ zarr::V2Array::compress_and_flush_data_()
         }
     }
 
-    shared_latch->wait();
+    // wait for all jobs to finish
+    for (auto& future : futures) {
+        future.wait();
+    }
+
     return static_cast<bool>(all_successful);
 }
 

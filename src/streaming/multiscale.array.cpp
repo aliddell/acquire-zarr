@@ -62,9 +62,9 @@ zarr::MultiscaleArray::write_frame(LockedBuffer& data)
 bool
 zarr::MultiscaleArray::close_()
 {
-    for (auto i = 0; i < arrays_.size(); ++i) {
-        if (!finalize_array(std::move(arrays_[i]))) {
-            LOG_ERROR("Error closing group: failed to finalize array ", i);
+    for (auto& array: arrays_) {
+        if (!array->close_()) {
+            LOG_ERROR("Error closing group: failed to finalize sub-array");
             return false;
         }
     }
@@ -225,23 +225,3 @@ zarr::MultiscaleArray::write_multiscale_frames_(LockedBuffer& data)
     }
 }
 
-bool
-zarr::finalize_group(std::unique_ptr<MultiscaleArray>&& array)
-{
-    if (array == nullptr) {
-        LOG_INFO("MultiscaleArray is null. Nothing to finalize.");
-        return true;
-    }
-
-    try {
-        if (!array->close_()) {
-            return false;
-        }
-    } catch (const std::exception& exc) {
-        LOG_ERROR("Failed to close multiscale array: ", exc.what());
-        return false;
-    }
-
-    array.reset();
-    return true;
-}
