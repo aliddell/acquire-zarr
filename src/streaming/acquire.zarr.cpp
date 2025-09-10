@@ -246,6 +246,245 @@ extern "C"
         settings->dimension_count = 0;
     }
 
+    ZarrStatusCode ZarrHCSWell_create_image_array(ZarrHCSWell* well,
+                                                  size_t image_count)
+    {
+        EXPECT_VALID_ARGUMENT(well, "Null pointer: well");
+        EXPECT_VALID_ARGUMENT(
+          image_count > 0, "Invalid image count: ", image_count);
+
+        ZarrHCSFieldOfView* images = nullptr;
+
+        try {
+            images = new ZarrHCSFieldOfView[image_count];
+        } catch (const std::bad_alloc&) {
+            LOG_ERROR("Failed to allocate memory for images");
+            return ZarrStatusCode_OutOfMemory;
+        }
+
+        ZarrHCSWell_destroy_image_array(well);
+        memset(images, 0, sizeof(ZarrHCSFieldOfView) * image_count);
+        well->images = images;
+        well->image_count = image_count;
+
+        return ZarrStatusCode_Success;
+    }
+
+    void ZarrHCSWell_destroy_image_array(ZarrHCSWell* well)
+    {
+        if (well == nullptr) {
+            return;
+        }
+
+        if (well->images != nullptr) {
+            // destroy array settings for each image
+            for (auto i = 0; i < well->image_count; ++i) {
+                ZarrArraySettings_destroy_dimension_array(
+                  well->images[i].array_settings);
+                well->images[i].array_settings = nullptr;
+            }
+            delete[] well->images;
+            well->images = nullptr;
+        }
+        well->image_count = 0;
+    }
+
+    ZarrStatusCode ZarrHCSPlate_create_well_array(ZarrHCSPlate* plate,
+                                                  size_t well_count)
+    {
+        EXPECT_VALID_ARGUMENT(plate, "Null pointer: plate");
+        EXPECT_VALID_ARGUMENT(
+          well_count > 0, "Invalid well count: ", well_count);
+
+        ZarrHCSWell* wells = nullptr;
+
+        try {
+            wells = new ZarrHCSWell[well_count];
+        } catch (const std::bad_alloc&) {
+            LOG_ERROR("Failed to allocate memory for wells");
+            return ZarrStatusCode_OutOfMemory;
+        }
+
+        ZarrHCSPlate_destroy_well_array(plate);
+        memset(wells, 0, sizeof(ZarrHCSWell) * well_count);
+        plate->wells = wells;
+        plate->well_count = well_count;
+
+        return ZarrStatusCode_Success;
+    }
+
+    void ZarrHCSPlate_destroy_well_array(ZarrHCSPlate* plate)
+    {
+        if (plate == nullptr) {
+            return;
+        }
+
+        if (plate->wells != nullptr) {
+            // destroy image arrays for each well
+            for (auto i = 0; i < plate->well_count; ++i) {
+                ZarrHCSWell_destroy_image_array(plate->wells + i);
+            }
+            delete[] plate->wells;
+            plate->wells = nullptr;
+        }
+        plate->well_count = 0;
+    }
+
+    ZarrStatusCode ZarrHCSPlate_create_acquisition_array(
+      ZarrHCSPlate* plate,
+      size_t acquisition_count)
+    {
+        EXPECT_VALID_ARGUMENT(plate, "Null pointer: plate");
+        EXPECT_VALID_ARGUMENT(acquisition_count > 0,
+                              "Invalid acquisition count: ",
+                              acquisition_count);
+
+        ZarrHCSAcquisition* acquisitions = nullptr;
+
+        try {
+            acquisitions = new ZarrHCSAcquisition[acquisition_count];
+        } catch (const std::bad_alloc&) {
+            LOG_ERROR("Failed to allocate memory for acquisitions");
+            return ZarrStatusCode_OutOfMemory;
+        }
+
+        ZarrHCSPlate_destroy_acquisition_array(plate);
+        memset(acquisitions, 0, sizeof(ZarrHCSAcquisition) * acquisition_count);
+        plate->acquisitions = acquisitions;
+        plate->acquisition_count = acquisition_count;
+
+        return ZarrStatusCode_Success;
+    }
+
+    void ZarrHCSPlate_destroy_acquisition_array(ZarrHCSPlate* plate)
+    {
+        if (plate == nullptr) {
+            return;
+        }
+
+        if (plate->acquisitions != nullptr) {
+            delete[] plate->acquisitions;
+            plate->acquisitions = nullptr;
+        }
+        plate->acquisition_count = 0;
+    }
+
+    ZarrStatusCode ZarrHCSPlate_create_row_name_array(ZarrHCSPlate* plate,
+                                                      size_t row_count)
+    {
+        EXPECT_VALID_ARGUMENT(plate, "Null pointer: plate");
+        EXPECT_VALID_ARGUMENT(row_count > 0, "Invalid row count: ", row_count);
+
+        const char** row_names = nullptr;
+
+        try {
+            row_names = new const char*[row_count];
+        } catch (const std::bad_alloc&) {
+            LOG_ERROR("Failed to allocate memory for row names");
+            return ZarrStatusCode_OutOfMemory;
+        }
+
+        ZarrHCSPlate_destroy_row_name_array(plate);
+        memset(row_names, 0, sizeof(char*) * row_count);
+        plate->row_names = row_names;
+        plate->row_count = row_count;
+
+        return ZarrStatusCode_Success;
+    }
+
+    void ZarrHCSPlate_destroy_row_name_array(ZarrHCSPlate* plate)
+    {
+        if (plate == nullptr) {
+            return;
+        }
+
+        if (plate->row_names != nullptr) {
+            delete[] plate->row_names;
+            plate->row_names = nullptr;
+        }
+        plate->row_count = 0;
+    }
+
+    ZarrStatusCode ZarrHCSPlate_create_column_name_array(ZarrHCSPlate* plate,
+                                                      size_t column_count)
+    {
+        EXPECT_VALID_ARGUMENT(plate, "Null pointer: plate");
+        EXPECT_VALID_ARGUMENT(column_count > 0, "Invalid column count: ", column_count);
+
+        const char** column_names = nullptr;
+
+        try {
+            column_names = new const char*[column_count];
+        } catch (const std::bad_alloc&) {
+            LOG_ERROR("Failed to allocate memory for column names");
+            return ZarrStatusCode_OutOfMemory;
+        }
+
+        ZarrHCSPlate_destroy_column_name_array(plate);
+        memset(column_names, 0, sizeof(char*) * column_count);
+        plate->column_names = column_names;
+        plate->column_count = column_count;
+
+        return ZarrStatusCode_Success;
+    }
+
+    void ZarrHCSPlate_destroy_column_name_array(ZarrHCSPlate* plate)
+    {
+        if (plate == nullptr) {
+            return;
+        }
+
+        if (plate->column_names != nullptr) {
+            delete[] plate->column_names;
+            plate->column_names = nullptr;
+        }
+        plate->column_count = 0;
+    }
+
+    ZarrStatusCode ZarrHCSSettings_create_plate_array(ZarrHCSSettings* settings,
+                                                      size_t plate_count)
+    {
+        EXPECT_VALID_ARGUMENT(settings, "Null pointer: settings");
+        EXPECT_VALID_ARGUMENT(
+          plate_count > 0, "Invalid plate count: ", plate_count);
+
+        ZarrHCSPlate* plates = nullptr;
+
+        try {
+            plates = new ZarrHCSPlate[plate_count];
+        } catch (const std::bad_alloc&) {
+            LOG_ERROR("Failed to allocate memory for plates");
+            return ZarrStatusCode_OutOfMemory;
+        }
+
+        ZarrHCSSettings_destroy_plate_array(settings);
+        memset(plates, 0, sizeof(ZarrHCSPlate) * plate_count);
+        settings->plates = plates;
+        settings->plate_count = plate_count;
+
+        return ZarrStatusCode_Success;
+    }
+
+    void ZarrHCSSettings_destroy_plate_array(ZarrHCSSettings* settings)
+    {
+        if (settings == nullptr) {
+            return;
+        }
+
+        if (settings->plates != nullptr) {
+            // destroy well and acquisition arrays for each plate
+            for (auto i = 0; i < settings->plate_count; ++i) {
+                ZarrHCSPlate_destroy_well_array(settings->plates + i);
+                ZarrHCSPlate_destroy_acquisition_array(settings->plates + i);
+                ZarrHCSPlate_destroy_row_name_array(settings->plates + i);
+                ZarrHCSPlate_destroy_column_name_array(settings->plates + i);
+            }
+            delete[] settings->plates;
+            settings->plates = nullptr;
+        }
+        settings->plate_count = 0;
+    }
+
     ZarrStream_s* ZarrStream_create(struct ZarrStreamSettings_s* settings)
     {
 

@@ -7,6 +7,7 @@
 #include "frame.queue.hh"
 #include "locked.buffer.hh"
 #include "multiscale.array.hh"
+#include "plate.hh"
 #include "s3.connection.hh"
 #include "sink.hh"
 #include "thread.pool.hh"
@@ -67,6 +68,10 @@ struct ZarrStream_s
     std::string store_path_;
     std::optional<zarr::S3Settings> s3_settings_;
 
+    // maps of plates and wells, key by their paths relative to the store root
+    std::unordered_map<std::string, zarr::Plate> plates_;
+    std::unordered_map<std::string, const zarr::Well&> wells_;
+
     std::unordered_map<std::string, ZarrOutputArray> output_arrays_;
     std::vector<std::string> intermediate_group_paths_;
 
@@ -97,8 +102,20 @@ struct ZarrStream_s
     /**
      * @brief Configure the stream for an array.
      * @param settings Struct containing settings to configure.
+     * @param parent_path Path to the parent group of the array.
+     * @return True if the array was configured successfully, false otherwise.
      */
-    [[nodiscard]] bool configure_array_(const ZarrArraySettings* settings);
+    [[nodiscard]] bool configure_array_(const ZarrArraySettings* settings,
+                                        const std::string& parent_path);
+
+    /**
+     * @brief Commit HCS settings to the stream.
+     * @param hcs_settings Struct containing HCS settings to commit.
+     * @return True if the HCS settings were committed successfully, false
+     * otherwise.
+     */
+    [[nodiscard]] bool commit_hcs_settings_(
+      const ZarrHCSSettings* hcs_settings);
 
     /**
      * @brief Copy settings to the stream and create the output node.
@@ -129,7 +146,8 @@ struct ZarrStream_s
     [[nodiscard]] bool create_store_(bool overwrite);
 
     /**
-     * @brief Write intermediate group metadata to the store.
+     * @brief Write intermediate group metadata to the store, including HCS
+     * metadata (if applicable).
      * @return True if the metadata was written successfully, false otherwise.
      */
     [[nodiscard]] bool write_intermediate_metadata_();

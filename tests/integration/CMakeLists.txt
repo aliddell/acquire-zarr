@@ -19,6 +19,8 @@ set(tests
         stream-zarr-v3-multiscale-trivial-3rd-dim
         stream-zarr-v3-multiple-arrays-to-filesystem
         estimate-memory-usage
+        stream-pure-hcs-acquisition
+        stream-mixed-flat-and-hcs-acquisition
 )
 
 foreach (name ${tests})
