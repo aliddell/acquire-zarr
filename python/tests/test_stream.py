@@ -32,6 +32,10 @@ from acquire_zarr import (
     ZarrVersion,
     LogLevel,
     DownsamplingMethod,
+    Plate,
+    Well,
+    FieldOfView,
+    Acquisition,
     set_log_level,
     get_log_level,
 )
@@ -75,10 +79,10 @@ def settings():
 @pytest.fixture(scope="module")
 def s3_settings():
     if (
-            "ZARR_S3_ENDPOINT" not in os.environ
-            or "ZARR_S3_BUCKET_NAME" not in os.environ
-            or "AWS_ACCESS_KEY_ID" not in os.environ
-            or "AWS_SECRET_ACCESS_KEY" not in os.environ
+        "ZARR_S3_ENDPOINT" not in os.environ
+        or "ZARR_S3_BUCKET_NAME" not in os.environ
+        or "AWS_ACCESS_KEY_ID" not in os.environ
+        or "AWS_SECRET_ACCESS_KEY" not in os.environ
     ):
         yield None
     else:
@@ -96,6 +100,171 @@ def s3_settings():
 def store_path(tmp_path):
     yield tmp_path
     shutil.rmtree(tmp_path)
+
+
+def create_hcs_settings():
+    """Create HCS settings that match the C++ test structure."""
+    # Well C/5 with two FOVs
+    c5_fov1_array = ArraySettings(
+        output_key="fov1",  # Will be at test_plate/C/5/fov1
+        data_type=np.uint8,
+        dimensions=[
+            Dimension(
+                name="z",
+                kind=DimensionType.SPACE,
+                array_size_px=0,
+                chunk_size_px=1,
+                shard_size_chunks=1,
+            ),
+            Dimension(
+                name="y",
+                kind=DimensionType.SPACE,
+                array_size_px=480,
+                chunk_size_px=256,
+                shard_size_chunks=4,
+            ),
+            Dimension(
+                name="x",
+                kind=DimensionType.SPACE,
+                array_size_px=640,
+                chunk_size_px=256,
+                shard_size_chunks=4,
+            ),
+        ],
+    )
+
+    c5_fov2_array = ArraySettings(
+        output_key="fov2",  # Will be at test_plate/C/5/fov2
+        data_type=np.uint16,
+        dimensions=[
+            Dimension(
+                name="z",
+                kind=DimensionType.SPACE,
+                array_size_px=0,
+                chunk_size_px=1,
+                shard_size_chunks=1,
+            ),
+            Dimension(
+                name="y",
+                kind=DimensionType.SPACE,
+                array_size_px=480,
+                chunk_size_px=256,
+                shard_size_chunks=4,
+            ),
+            Dimension(
+                name="x",
+                kind=DimensionType.SPACE,
+                array_size_px=640,
+                chunk_size_px=256,
+                shard_size_chunks=4,
+            ),
+        ],
+    )
+
+    c5_well = Well(
+        row_name="C",
+        column_name="5",
+        images=[
+            FieldOfView(
+                path="fov1", acquisition_id=0, array_settings=c5_fov1_array
+            ),
+            FieldOfView(
+                path="fov2", acquisition_id=1, array_settings=c5_fov2_array
+            ),
+        ],
+    )
+
+    # Well D/7 with one FOV
+    d7_fov1_array = ArraySettings(
+        output_key="fov1",  # Will be at test_plate/D/7/fov1
+        data_type=np.uint16,
+        dimensions=[
+            Dimension(
+                name="t",
+                kind=DimensionType.TIME,
+                array_size_px=10,
+                chunk_size_px=1,
+                shard_size_chunks=1,
+            ),
+            Dimension(
+                name="c",
+                kind=DimensionType.CHANNEL,
+                array_size_px=3,
+                chunk_size_px=1,
+                shard_size_chunks=1,
+            ),
+            Dimension(
+                name="z",
+                kind=DimensionType.SPACE,
+                array_size_px=5,
+                chunk_size_px=1,
+                shard_size_chunks=1,
+            ),
+            Dimension(
+                name="y",
+                kind=DimensionType.SPACE,
+                array_size_px=512,
+                chunk_size_px=256,
+                shard_size_chunks=4,
+            ),
+            Dimension(
+                name="x",
+                kind=DimensionType.SPACE,
+                array_size_px=512,
+                chunk_size_px=256,
+                shard_size_chunks=4,
+            ),
+        ],
+    )
+
+    d7_well = Well(
+        row_name="D",
+        column_name="7",
+        images=[
+            FieldOfView(
+                path="fov1", acquisition_id=0, array_settings=d7_fov1_array
+            ),
+        ],
+    )
+
+    # Create plate with acquisitions
+    acquisitions = [
+        Acquisition(
+            id=0,
+            name="Meas_01(2012-07-31_10-41-12)",
+            start_time=1343731272000,
+        ),
+        Acquisition(
+            id=1,
+            name="Meas_02(2012-07-31_10-45-12)",
+            start_time=1343735801000,
+            end_time=1343737645000,
+        ),
+    ]
+
+    plate = Plate(
+        path="test_plate",
+        name="Test Plate",
+        row_names=["A", "B", "C", "D", "E", "F", "G", "H"],
+        column_names=[
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "10",
+            "11",
+            "12",
+        ],
+        wells=[c5_well, d7_well],
+        acquisitions=acquisitions,
+    )
+
+    return plate
 
 
 def validate_v2_metadata(store_path: Path):
@@ -149,10 +318,10 @@ def validate_v3_metadata(store_path: Path):
     ],
 )
 def test_create_stream(
-        settings: StreamSettings,
-        store_path: Path,
-        request: pytest.FixtureRequest,
-        version: ZarrVersion,
+    settings: StreamSettings,
+    store_path: Path,
+    request: pytest.FixtureRequest,
+    version: ZarrVersion,
 ):
     settings.store_path = str(store_path / f"{request.node.name}.zarr")
     settings.version = version
@@ -180,41 +349,41 @@ def test_create_stream(
 
 @pytest.mark.parametrize(
     (
-            "version",
-            "compression_codec",
+        "version",
+        "compression_codec",
     ),
     [
         (
-                ZarrVersion.V2,
-                None,
+            ZarrVersion.V2,
+            None,
         ),
         (
-                ZarrVersion.V2,
-                CompressionCodec.BLOSC_LZ4,
+            ZarrVersion.V2,
+            CompressionCodec.BLOSC_LZ4,
         ),
         (
-                ZarrVersion.V2,
-                CompressionCodec.BLOSC_ZSTD,
+            ZarrVersion.V2,
+            CompressionCodec.BLOSC_ZSTD,
         ),
         (
-                ZarrVersion.V3,
-                None,
+            ZarrVersion.V3,
+            None,
         ),
         (
-                ZarrVersion.V3,
-                CompressionCodec.BLOSC_LZ4,
+            ZarrVersion.V3,
+            CompressionCodec.BLOSC_LZ4,
         ),
         (
-                ZarrVersion.V3,
-                CompressionCodec.BLOSC_ZSTD,
+            ZarrVersion.V3,
+            CompressionCodec.BLOSC_ZSTD,
         ),
     ],
 )
 def test_stream_data_to_filesystem(
-        settings: StreamSettings,
-        store_path: Path,
-        version: ZarrVersion,
-        compression_codec: Optional[CompressionCodec],
+    settings: StreamSettings,
+    store_path: Path,
+    version: ZarrVersion,
+    compression_codec: Optional[CompressionCodec],
 ):
     settings.store_path = str(store_path / "test.zarr")
     settings.version = version
@@ -256,7 +425,7 @@ def test_stream_data_to_filesystem(
             shard_size_bytes *= dim.shard_size_chunks
             table_size_bytes *= dim.shard_size_chunks
     shard_size_bytes = (
-            shard_size_bytes + table_size_bytes + 4
+        shard_size_bytes + table_size_bytes + 4
     )  # 4 bytes for crc32c checksum
 
     group = zarr.open(settings.store_path, mode="r")
@@ -282,8 +451,8 @@ def test_stream_data_to_filesystem(
             # check that the data is compressed
             assert (store_path / "test.zarr" / "0" / "0" / "0" / "0").is_file()
             assert (
-                           store_path / "test.zarr" / "0" / "0" / "0" / "0"
-                   ).stat().st_size <= chunk_size_bytes
+                store_path / "test.zarr" / "0" / "0" / "0" / "0"
+            ).stat().st_size <= chunk_size_bytes
         else:
             cname = (
                 zblosc.BloscCname.lz4
@@ -296,68 +465,68 @@ def test_stream_data_to_filesystem(
             assert blosc_codec.shuffle == zblosc.BloscShuffle.shuffle
 
             assert (
-                    store_path / "test.zarr" / "0" / "c" / "0" / "0" / "0"
+                store_path / "test.zarr" / "0" / "c" / "0" / "0" / "0"
             ).is_file()
             assert (
-                           store_path / "test.zarr" / "0" / "c" / "0" / "0" / "0"
-                   ).stat().st_size <= shard_size_bytes
+                store_path / "test.zarr" / "0" / "c" / "0" / "0" / "0"
+            ).stat().st_size <= shard_size_bytes
     else:
         if version == ZarrVersion.V2:
             assert metadata.compressor is None
 
             assert (store_path / "test.zarr" / "0" / "0" / "0" / "0").is_file()
             assert (
-                           store_path / "test.zarr" / "0" / "0" / "0" / "0"
-                   ).stat().st_size == chunk_size_bytes
+                store_path / "test.zarr" / "0" / "0" / "0" / "0"
+            ).stat().st_size == chunk_size_bytes
         else:
             assert len(metadata.codecs[0].codecs) == 1
 
             assert (
-                    store_path / "test.zarr" / "0" / "c" / "0" / "0" / "0"
+                store_path / "test.zarr" / "0" / "c" / "0" / "0" / "0"
             ).is_file()
             assert (
-                           store_path / "test.zarr" / "0" / "c" / "0" / "0" / "0"
-                   ).stat().st_size == shard_size_bytes
+                store_path / "test.zarr" / "0" / "c" / "0" / "0" / "0"
+            ).stat().st_size == shard_size_bytes
 
 
 @pytest.mark.parametrize(
     (
-            "version",
-            "compression_codec",
+        "version",
+        "compression_codec",
     ),
     [
         (
-                ZarrVersion.V2,
-                None,
+            ZarrVersion.V2,
+            None,
         ),
         (
-                ZarrVersion.V2,
-                CompressionCodec.BLOSC_LZ4,
+            ZarrVersion.V2,
+            CompressionCodec.BLOSC_LZ4,
         ),
         (
-                ZarrVersion.V2,
-                CompressionCodec.BLOSC_ZSTD,
+            ZarrVersion.V2,
+            CompressionCodec.BLOSC_ZSTD,
         ),
         (
-                ZarrVersion.V3,
-                None,
+            ZarrVersion.V3,
+            None,
         ),
         (
-                ZarrVersion.V3,
-                CompressionCodec.BLOSC_LZ4,
+            ZarrVersion.V3,
+            CompressionCodec.BLOSC_LZ4,
         ),
         (
-                ZarrVersion.V3,
-                CompressionCodec.BLOSC_ZSTD,
+            ZarrVersion.V3,
+            CompressionCodec.BLOSC_ZSTD,
         ),
     ],
 )
 def test_stream_data_to_s3(
-        settings: StreamSettings,
-        s3_settings: Optional[S3Settings],
-        request: pytest.FixtureRequest,
-        version: ZarrVersion,
-        compression_codec: Optional[CompressionCodec],
+    settings: StreamSettings,
+    s3_settings: Optional[S3Settings],
+    request: pytest.FixtureRequest,
+    version: ZarrVersion,
+    compression_codec: Optional[CompressionCodec],
 ):
     if s3_settings is None:
         pytest.skip("S3 settings not set")
@@ -470,11 +639,11 @@ def test_set_log_level(level: LogLevel):
     ],
 )
 def test_write_custom_metadata(
-        settings: StreamSettings,
-        store_path: Path,
-        request: pytest.FixtureRequest,
-        version: ZarrVersion,
-        overwrite: bool,
+    settings: StreamSettings,
+    store_path: Path,
+    request: pytest.FixtureRequest,
+    version: ZarrVersion,
+    overwrite: bool,
 ):
     settings.store_path = str(store_path / f"{request.node.name}.zarr")
     settings.version = version
@@ -506,7 +675,7 @@ def test_write_custom_metadata(
 
 
 def test_write_transposed_array(
-        store_path: Path,
+    store_path: Path,
 ):
     settings = StreamSettings(
         arrays=[
@@ -556,8 +725,8 @@ def test_write_transposed_array(
     settings.version = ZarrVersion.V3
 
     data = np.random.randint(
-        -(2 ** 16),
-        2 ** 16 - 1,
+        -(2**16),
+        2**16 - 1,
         (
             settings.arrays[0].dimensions[0].chunk_size_px,
             settings.arrays[0].dimensions[1].array_size_px,
@@ -584,7 +753,7 @@ def test_write_transposed_array(
 
 
 def test_column_ragged_sharding(
-        store_path: Path,
+    store_path: Path,
 ):
     settings = StreamSettings(
         arrays=[
@@ -620,8 +789,8 @@ def test_column_ragged_sharding(
     settings.version = ZarrVersion.V3
 
     data = np.random.randint(
-        -(2 ** 16),
-        2 ** 16 - 1,
+        -(2**16),
+        2**16 - 1,
         (
             settings.arrays[0].dimensions[0].array_size_px,
             settings.arrays[0].dimensions[1].array_size_px,
@@ -684,8 +853,8 @@ def test_custom_dimension_units_and_scales(store_path: Path):
     settings.version = ZarrVersion.V3
 
     data = np.random.randint(
-        -(2 ** 16),
-        2 ** 16 - 1,
+        -(2**16),
+        2**16 - 1,
         (
             settings.arrays[0].dimensions[0].array_size_px,
             settings.arrays[0].dimensions[1].array_size_px,
@@ -779,8 +948,8 @@ def test_2d_multiscale_stream(store_path: Path, method: DownsamplingMethod):
     settings.version = ZarrVersion.V3
 
     data = np.random.randint(
-        -(2 ** 16),
-        2 ** 16 - 1,
+        -(2**16),
+        2**16 - 1,
         (
             settings.arrays[0].dimensions[0].array_size_px,
             settings.arrays[0].dimensions[1].array_size_px,
@@ -868,7 +1037,7 @@ def test_3d_multiscale_stream(store_path: Path, method: DownsamplingMethod):
 
     data = np.random.randint(
         0,
-        2 ** 16 - 1,
+        2**16 - 1,
         (
             settings.arrays[0].dimensions[0].array_size_px,
             settings.arrays[0].dimensions[1].array_size_px,
@@ -945,10 +1114,10 @@ def test_3d_multiscale_stream(store_path: Path, method: DownsamplingMethod):
     ],
 )
 def test_stream_data_to_named_array(
-        settings: StreamSettings,
-        store_path: Path,
-        output_key: str,
-        downsampling_method: DownsamplingMethod,
+    settings: StreamSettings,
+    store_path: Path,
+    output_key: str,
+    downsampling_method: DownsamplingMethod,
 ):
     settings.store_path = str(
         store_path
@@ -1040,7 +1209,7 @@ def test_anisotropic_downsampling(settings: StreamSettings, store_path: Path):
     # Create test data
     data = np.random.randint(
         0,
-        2 ** 8 - 1,
+        2**8 - 1,
         (
             settings.arrays[0].dimensions[0].array_size_px,
             settings.arrays[0].dimensions[1].array_size_px,
@@ -1086,9 +1255,9 @@ def test_anisotropic_downsampling(settings: StreamSettings, store_path: Path):
     ],
 )
 def test_multiarray_metadata_structure(
-        settings: StreamSettings,
-        store_path: Path,
-        version: ZarrVersion,
+    settings: StreamSettings,
+    store_path: Path,
+    version: ZarrVersion,
 ):
     settings.store_path = str(store_path / "multiarray_metadata_test.zarr")
     settings.version = version
@@ -1284,24 +1453,47 @@ def test_multiarray_metadata_structure(
     assert np.array_equal(array2_group, array2_data)
 
 
-def test_get_current_memory_usage(
-        settings: StreamSettings,
-        store_path: Path):
+def test_get_current_memory_usage(settings: StreamSettings, store_path: Path):
     settings.store_path = str(store_path / "memory_usage_test.zarr")
     settings.overwrite = True
 
     array1_settings = ArraySettings(
         output_key="array1",
         dimensions=[
-            Dimension(name="time", kind=DimensionType.TIME, array_size_px=0, chunk_size_px=32, shard_size_chunks=1),
-            Dimension(name="channel", kind=DimensionType.CHANNEL, array_size_px=3, chunk_size_px=1,
-                      shard_size_chunks=1),
-            Dimension(name="height", kind=DimensionType.SPACE, array_size_px=48, chunk_size_px=16, shard_size_chunks=3),
-            Dimension(name="width", kind=DimensionType.SPACE, array_size_px=64, chunk_size_px=16, shard_size_chunks=4),
+            Dimension(
+                name="time",
+                kind=DimensionType.TIME,
+                array_size_px=0,
+                chunk_size_px=32,
+                shard_size_chunks=1,
+            ),
+            Dimension(
+                name="channel",
+                kind=DimensionType.CHANNEL,
+                array_size_px=3,
+                chunk_size_px=1,
+                shard_size_chunks=1,
+            ),
+            Dimension(
+                name="height",
+                kind=DimensionType.SPACE,
+                array_size_px=48,
+                chunk_size_px=16,
+                shard_size_chunks=3,
+            ),
+            Dimension(
+                name="width",
+                kind=DimensionType.SPACE,
+                array_size_px=64,
+                chunk_size_px=16,
+                shard_size_chunks=4,
+            ),
         ],
         data_type=np.uint16,
     )
-    array1_usage = 64 * 48 * 3 * 32 * np.dtype(np.uint16).itemsize  # 64 * 48 * 3 * 32 * 2 bytes
+    array1_usage = (
+        64 * 48 * 3 * 32 * np.dtype(np.uint16).itemsize
+    )  # 64 * 48 * 3 * 32 * 2 bytes
 
     array2_settings = ArraySettings(
         output_key="array2",
@@ -1312,15 +1504,40 @@ def test_get_current_memory_usage(
             shuffle=1,
         ),
         dimensions=[
-            Dimension(name="time", kind=DimensionType.TIME, array_size_px=0, chunk_size_px=32, shard_size_chunks=2),
-            Dimension(name="channel", kind=DimensionType.CHANNEL, array_size_px=3, chunk_size_px=1,
-                      shard_size_chunks=1),
-            Dimension(name="height", kind=DimensionType.SPACE, array_size_px=48, chunk_size_px=16, shard_size_chunks=3),
-            Dimension(name="width", kind=DimensionType.SPACE, array_size_px=64, chunk_size_px=16, shard_size_chunks=4),
+            Dimension(
+                name="time",
+                kind=DimensionType.TIME,
+                array_size_px=0,
+                chunk_size_px=32,
+                shard_size_chunks=2,
+            ),
+            Dimension(
+                name="channel",
+                kind=DimensionType.CHANNEL,
+                array_size_px=3,
+                chunk_size_px=1,
+                shard_size_chunks=1,
+            ),
+            Dimension(
+                name="height",
+                kind=DimensionType.SPACE,
+                array_size_px=48,
+                chunk_size_px=16,
+                shard_size_chunks=3,
+            ),
+            Dimension(
+                name="width",
+                kind=DimensionType.SPACE,
+                array_size_px=64,
+                chunk_size_px=16,
+                shard_size_chunks=4,
+            ),
         ],
         data_type=np.uint16,
     )
-    array2_usage = 64 * 48 * 3 * 32 * np.dtype(np.uint16).itemsize  # 64 * 48 * 3 * 32 * 2 bytes
+    array2_usage = (
+        64 * 48 * 3 * 32 * np.dtype(np.uint16).itemsize
+    )  # 64 * 48 * 3 * 32 * 2 bytes
 
     array3_settings = ArraySettings(
         output_key="array3",
@@ -1331,19 +1548,50 @@ def test_get_current_memory_usage(
             shuffle=1,
         ),
         dimensions=[
-            Dimension(name="time", kind=DimensionType.TIME, array_size_px=0, chunk_size_px=32, shard_size_chunks=3),
-            Dimension(name="channel", kind=DimensionType.CHANNEL, array_size_px=3, chunk_size_px=1,
-                      shard_size_chunks=1),
-            Dimension(name="height", kind=DimensionType.SPACE, array_size_px=48, chunk_size_px=16, shard_size_chunks=3),
-            Dimension(name="width", kind=DimensionType.SPACE, array_size_px=64, chunk_size_px=16, shard_size_chunks=4),
+            Dimension(
+                name="time",
+                kind=DimensionType.TIME,
+                array_size_px=0,
+                chunk_size_px=32,
+                shard_size_chunks=3,
+            ),
+            Dimension(
+                name="channel",
+                kind=DimensionType.CHANNEL,
+                array_size_px=3,
+                chunk_size_px=1,
+                shard_size_chunks=1,
+            ),
+            Dimension(
+                name="height",
+                kind=DimensionType.SPACE,
+                array_size_px=48,
+                chunk_size_px=16,
+                shard_size_chunks=3,
+            ),
+            Dimension(
+                name="width",
+                kind=DimensionType.SPACE,
+                array_size_px=64,
+                chunk_size_px=16,
+                shard_size_chunks=4,
+            ),
         ],
         data_type=np.uint16,
         downsampling_method=DownsamplingMethod.MEAN,
     )
-    lod0_usage = 64 * 48 * 3 * 32 * np.dtype(np.uint16).itemsize  # 64 * 48 * 3 * 32 * 2 bytes
-    lod1_usage = 32 * 32 * 3 * 32 * np.dtype(np.uint16).itemsize  # 32 * 24 (padded to 32) * 3 * 32 * 2 bytes
-    lod2_usage = 16 * 12 * 3 * 32 * np.dtype(np.uint16).itemsize  # 16 * 12 * 3 * 32 * 2 bytes
-    array3_usage = lod0_usage + lod1_usage + lod2_usage  # total memory usage for all LODs
+    lod0_usage = (
+        64 * 48 * 3 * 32 * np.dtype(np.uint16).itemsize
+    )  # 64 * 48 * 3 * 32 * 2 bytes
+    lod1_usage = (
+        32 * 32 * 3 * 32 * np.dtype(np.uint16).itemsize
+    )  # 32 * 24 (padded to 32) * 3 * 32 * 2 bytes
+    lod2_usage = (
+        16 * 12 * 3 * 32 * np.dtype(np.uint16).itemsize
+    )  # 16 * 12 * 3 * 32 * 2 bytes
+    array3_usage = (
+        lod0_usage + lod1_usage + lod2_usage
+    )  # total memory usage for all LODs
 
     frame_buffer_size = 2 * 48 * 64
 
@@ -1356,7 +1604,7 @@ def test_get_current_memory_usage(
     assert usage == frame_buffer_size
 
     # add some data to the stream
-    data = np.random.randint(0, 2 ** 16 - 1, (32, 3, 48, 64))
+    data = np.random.randint(0, 2**16 - 1, (32, 3, 48, 64))
     stream.append(data[:31, :, :, :])  # fill the buffer, but don't flush
 
     time.sleep(0.5)  # allow some time for the stream to process
@@ -1384,9 +1632,13 @@ def test_get_current_memory_usage(
     assert usage == 2 * frame_buffer_size
 
     # add some data to the stream
-    data = np.random.randint(0, 2 ** 16 - 1, (32, 3, 48, 64))
-    stream.append(data[:31, :, :, :], key="array1")  # fill the buffer, but don't flush
-    stream.append(data[:31, :, :, :], key="array2")  # fill the buffer, but don't flush
+    data = np.random.randint(0, 2**16 - 1, (32, 3, 48, 64))
+    stream.append(
+        data[:31, :, :, :], key="array1"
+    )  # fill the buffer, but don't flush
+    stream.append(
+        data[:31, :, :, :], key="array2"
+    )  # fill the buffer, but don't flush
 
     time.sleep(0.5)  # allow some time for the stream to process
 
@@ -1394,14 +1646,20 @@ def test_get_current_memory_usage(
     assert usage == 2 * frame_buffer_size + array1_usage + array2_usage
 
     # add the last frame to induce a flush
-    stream.append(data[31:, :, :, :], key="array1")  # this should flush the data in array1
+    stream.append(
+        data[31:, :, :, :], key="array1"
+    )  # this should flush the data in array1
 
     time.sleep(0.75)  # wait for data to flush
 
     usage = stream.get_current_memory_usage()
-    assert usage == 2 * frame_buffer_size + array2_usage  # the first array should be cleared out, but the second one is still in memory
+    assert (
+        usage == 2 * frame_buffer_size + array2_usage
+    )  # the first array should be cleared out, but the second one is still in memory
 
-    stream.append(data[31:, :, :, :], key="array2")  # this should flush the data in array2
+    stream.append(
+        data[31:, :, :, :], key="array2"
+    )  # this should flush the data in array2
 
     time.sleep(0.75)  # wait for data to flush
 
@@ -1420,36 +1678,331 @@ def test_get_current_memory_usage(
     assert usage == 3 * frame_buffer_size
 
     # add some data to the stream
-    data = np.random.randint(0, 2 ** 16 - 1, (32, 3, 48, 64))
-    stream.append(data[:31, :, :, :], key="array1")  # fill the buffer, but don't flush
-    stream.append(data[:31, :, :, :], key="array2")  # fill the buffer, but don't flush
-    stream.append(data[:31, :, :, :], key="array3")  # fill the buffer, but don't flush
+    data = np.random.randint(0, 2**16 - 1, (32, 3, 48, 64))
+    stream.append(
+        data[:31, :, :, :], key="array1"
+    )  # fill the buffer, but don't flush
+    stream.append(
+        data[:31, :, :, :], key="array2"
+    )  # fill the buffer, but don't flush
+    stream.append(
+        data[:31, :, :, :], key="array3"
+    )  # fill the buffer, but don't flush
 
     time.sleep(0.5)  # allow some time for the stream to process
 
     usage = stream.get_current_memory_usage()
-    assert usage == 3 * frame_buffer_size + array1_usage + array2_usage + array3_usage
+    assert (
+        usage
+        == 3 * frame_buffer_size + array1_usage + array2_usage + array3_usage
+    )
 
     # add the last frame to induce a flush
-    stream.append(data[31:, :, :, :], key="array1")  # this should flush the data in array1
+    stream.append(
+        data[31:, :, :, :], key="array1"
+    )  # this should flush the data in array1
 
     time.sleep(0.75)  # wait for data to flush
 
     usage = stream.get_current_memory_usage()
-    assert usage == 3 * frame_buffer_size + array2_usage + array3_usage # the first array should be cleared out, but the second and third are still in memory
+    assert (
+        usage == 3 * frame_buffer_size + array2_usage + array3_usage
+    )  # the first array should be cleared out, but the second and third are still in memory
 
-    stream.append(data[31:, :, :, :], key="array2")  # this should flush the data in array2
-
-    time.sleep(0.75)  # wait for data to flush
-
-    usage = stream.get_current_memory_usage()
-    assert usage == 3 * frame_buffer_size + array3_usage  # array3 is still in memory
-
-    stream.append(data[31:, :, :, :], key="array3")  # this should flush some of the data in array3
+    stream.append(
+        data[31:, :, :, :], key="array2"
+    )  # this should flush the data in array2
 
     time.sleep(0.75)  # wait for data to flush
 
     usage = stream.get_current_memory_usage()
-    assert usage == 3 * frame_buffer_size # everything should be cleared out
+    assert (
+        usage == 3 * frame_buffer_size + array3_usage
+    )  # array3 is still in memory
+
+    stream.append(
+        data[31:, :, :, :], key="array3"
+    )  # this should flush some of the data in array3
+
+    time.sleep(0.75)  # wait for data to flush
+
+    usage = stream.get_current_memory_usage()
+    assert usage == 3 * frame_buffer_size  # everything should be cleared out
 
     stream.close()
+
+
+def validate_generic_group_metadata(base_path: Path):
+    """Validate generic Zarr group metadata files."""
+    paths = [
+        base_path / "zarr.json",
+        base_path / "test_plate" / "C" / "zarr.json",
+        base_path / "test_plate" / "D" / "zarr.json",
+    ]
+
+    for path in paths:
+        assert path.exists(), f"Missing metadata file: {path}"
+
+        with open(path, "r") as f:
+            metadata = json.load(f)
+
+        assert metadata["zarr_format"] == 3
+        assert metadata["consolidated_metadata"] is None
+        assert metadata["node_type"] == "group"
+        assert metadata["attributes"] == {}
+
+
+def validate_plate_metadata(base_path: Path):
+    """Validate plate-level HCS metadata."""
+    plate_path = base_path / "test_plate" / "zarr.json"
+    assert plate_path.exists()
+
+    with open(plate_path, "r") as f:
+        metadata = json.load(f)
+
+    assert metadata["zarr_format"] == 3
+    assert metadata["consolidated_metadata"] is None
+    assert metadata["node_type"] == "group"
+
+    attributes = metadata["attributes"]
+    assert "ome" in attributes
+
+    ome = attributes["ome"]
+    assert len(ome) == 2
+    assert ome["version"] == "0.5"
+
+    plate = ome["plate"]
+    assert len(plate) == 7
+
+    # Validate plate fields
+    assert plate["name"] == "Test Plate"
+    assert plate["version"] == "0.5"
+    assert plate["field_count"] == 2
+
+    # Validate acquisitions
+    acquisitions = plate["acquisitions"]
+    assert len(acquisitions) == 2
+
+    acq0 = acquisitions[0]
+    assert len(acq0) == 4
+    assert acq0["id"] == 0
+    assert acq0["maximumfieldcount"] == 1
+    assert acq0["name"] == "Meas_01(2012-07-31_10-41-12)"
+    assert acq0["starttime"] == 1343731272000
+    assert "endtime" not in acq0
+
+    acq1 = acquisitions[1]
+    assert len(acq1) == 5
+    assert acq1["id"] == 1
+    assert acq1["maximumfieldcount"] == 1
+    assert acq1["name"] == "Meas_02(2012-07-31_10-45-12)"
+    assert acq1["starttime"] == 1343735801000
+    assert acq1["endtime"] == 1343737645000
+
+    # Validate columns
+    columns = plate["columns"]
+    assert len(columns) == 12
+    for i in range(1, 13):
+        assert columns[i - 1]["name"] == str(i)
+
+    # Validate rows
+    rows = plate["rows"]
+    assert len(rows) == 8
+    for i, letter in enumerate("ABCDEFGH"):
+        assert rows[i]["name"] == letter
+
+    # Validate wells
+    wells = plate["wells"]
+    assert len(wells) == 2
+
+    well0 = wells[0]
+    assert len(well0) == 3
+    assert well0["rowIndex"] == 2  # C
+    assert well0["columnIndex"] == 4  # 5
+    assert well0["path"] == "C/5"
+
+    well1 = wells[1]
+    assert len(well1) == 3
+    assert well1["rowIndex"] == 3  # D
+    assert well1["columnIndex"] == 6  # 7
+    assert well1["path"] == "D/7"
+
+
+def validate_well_metadata(base_path: Path):
+    """Validate well-level HCS metadata."""
+    paths = [
+        base_path / "test_plate" / "C" / "5" / "zarr.json",
+        base_path / "test_plate" / "D" / "7" / "zarr.json",
+    ]
+    expected_image_counts = [2, 1]
+
+    for i, path in enumerate(paths):
+        assert path.exists()
+
+        with open(path, "r") as f:
+            metadata = json.load(f)
+
+        assert metadata["zarr_format"] == 3
+        assert metadata["consolidated_metadata"] is None
+        assert metadata["node_type"] == "group"
+
+        attributes = metadata["attributes"]
+        assert "ome" in attributes
+
+        ome = attributes["ome"]
+        assert len(ome) == 2
+        assert ome["version"] == "0.5"
+
+        well = ome["well"]
+        assert len(well) == 2
+        assert well["version"] == "0.5"
+
+        images = well["images"]
+        assert len(images) == expected_image_counts[i]
+
+        # Check first image
+        img0 = images[0]
+        assert len(img0) == 2
+        assert img0["acquisition"] == 0
+        assert img0["path"] == "fov1"
+
+        # Check second image if present
+        if expected_image_counts[i] == 2:
+            img1 = images[1]
+            assert len(img1) == 2
+            assert img1["acquisition"] == 1
+            assert img1["path"] == "fov2"
+
+
+def check_arrays_exist(base_path: Path):
+    """Check that HCS arrays exist."""
+    paths = [
+        base_path / "test_plate" / "C" / "5" / "fov1",
+        base_path / "test_plate" / "C" / "5" / "fov2",
+        base_path / "test_plate" / "D" / "7" / "fov1",
+    ]
+
+    for path in paths:
+        array_path = path / "zarr.json"
+        assert array_path.exists(), f"Missing array: {path}"
+
+
+def check_arrays_exist_mixed(base_path: Path):
+    """Check that both HCS and flat arrays exist."""
+    paths = [
+        base_path / "test_plate" / "C" / "5" / "fov1",
+        base_path / "test_plate" / "C" / "5" / "fov2",
+        base_path / "test_plate" / "D" / "7" / "fov1",
+        base_path / "test_plate" / "C" / "5" / "labels",
+    ]
+
+    for path in paths:
+        array_path = path / "zarr.json"
+        assert array_path.exists(), f"Missing array: {path}"
+
+
+def test_pure_hcs_acquisition(store_path: Path):
+    """Test pure HCS acquisition (equivalent to stream-pure-hcs-acquisition.cpp)"""
+    plate = create_hcs_settings()
+
+    settings = StreamSettings(
+        store_path=str(store_path / "test.zarr"),
+        version=ZarrVersion.V3,
+        overwrite=True,
+        arrays=[],  # No flat arrays, only HCS
+        hcs_plates=[plate],
+    )
+
+    stream = ZarrStream(settings)
+    assert stream
+
+    # Write test data to each FOV
+    # FOV1 in well C/5 (uint8, 3D: z,y,x)
+    fov1_data = np.zeros((640, 480), dtype=np.uint8)
+    stream.append(fov1_data, key="test_plate/C/5/fov1")
+
+    # FOV2 in well C/5 (uint16, 3D: z,y,x)
+    fov2_data = np.zeros((640, 480), dtype=np.uint16)
+    stream.append(fov2_data, key="test_plate/C/5/fov2")
+
+    # FOV1 in well D/7 (uint16, 5D: t,c,z,y,x)
+    d7_fov1_data = np.zeros((512, 512), dtype=np.uint16)
+    stream.append(d7_fov1_data, key="test_plate/D/7/fov1")
+
+    stream.close()
+
+    # Validate the structure
+    validate_generic_group_metadata(store_path / "test.zarr")
+    validate_plate_metadata(store_path / "test.zarr")
+    validate_well_metadata(store_path / "test.zarr")
+    check_arrays_exist(store_path / "test.zarr")
+
+
+def test_mixed_flat_and_hcs_acquisition(store_path: Path):
+    """Test mixed flat and HCS acquisition (equivalent to stream-mixed-flat-and-hcs-acquisition.cpp)"""
+    plate = create_hcs_settings()
+
+    # Add a labels array outside the HCS structure
+    labels_array = ArraySettings(
+        output_key="test_plate/C/5/labels",
+        data_type=np.uint8,
+        dimensions=[
+            Dimension(
+                name="z",
+                kind=DimensionType.SPACE,
+                array_size_px=0,
+                chunk_size_px=1,
+                shard_size_chunks=1,
+            ),
+            Dimension(
+                name="y",
+                kind=DimensionType.SPACE,
+                array_size_px=480,
+                chunk_size_px=256,
+                shard_size_chunks=4,
+            ),
+            Dimension(
+                name="x",
+                kind=DimensionType.SPACE,
+                array_size_px=640,
+                chunk_size_px=256,
+                shard_size_chunks=4,
+            ),
+        ],
+    )
+
+    settings = StreamSettings(
+        store_path=str(store_path / "test.zarr"),
+        version=ZarrVersion.V3,
+        overwrite=True,
+        arrays=[labels_array],
+        hcs_plates=[plate],
+    )
+
+    stream = ZarrStream(settings)
+    assert stream
+
+    # Write test data to each array
+    # FOV1 in well C/5
+    fov1_data = np.zeros((640, 480), dtype=np.uint8)
+    stream.append(fov1_data, key="test_plate/C/5/fov1")
+
+    # FOV2 in well C/5
+    fov2_data = np.zeros((640, 480), dtype=np.uint16)
+    stream.append(fov2_data, key="test_plate/C/5/fov2")
+
+    # FOV1 in well D/7
+    d7_fov1_data = np.zeros((512, 512), dtype=np.uint16)
+    stream.append(d7_fov1_data, key="test_plate/D/7/fov1")
+
+    # Labels array in well C/5
+    labels_data = np.zeros((640, 480), dtype=np.uint8)
+    stream.append(labels_data, key="test_plate/C/5/labels")
+
+    stream.close()
+
+    # Validate the structure (same as pure HCS)
+    validate_generic_group_metadata(store_path / "test.zarr")
+    validate_plate_metadata(store_path / "test.zarr")
+    validate_well_metadata(store_path / "test.zarr")
+    check_arrays_exist_mixed(store_path / "test.zarr")
