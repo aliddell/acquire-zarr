@@ -85,4 +85,7 @@ bool
 compress_in_place(ByteVector& data,
                   const BloscCompressionParams& params,
                   size_t type_size);
+
+size_t
+align_to(size_t size, size_t align);
 } // namespace zarr
