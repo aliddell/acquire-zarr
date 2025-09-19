@@ -86,7 +86,7 @@ uint32_t
 zarr::chunks_along_dimension(const ZarrDimension& dimension)
 {
     return parts_along_dimension(dimension.array_size_px,
-                                  dimension.chunk_size_px);
+                                 dimension.chunk_size_px);
 }
 
 uint32_t
