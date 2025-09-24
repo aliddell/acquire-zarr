@@ -5,11 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] - [2025-09-24](https://github.com/acquire-project/acquire-zarr/compare/v0.5.2...v0.6.0)
 
 ### Added
 
-- New API methods for determining the maximum and current memory usage of a stream
+- New API methods for determining the maximum and current memory usage of a stream (#148)
 - Support for high-content screening (HCS) workflows with NGFF 0.5 metadata (#153)
 - New API function for retrieving the distinct array keys from a `ZarrStreamSettings` object (#154)
 
