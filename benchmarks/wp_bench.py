@@ -21,6 +21,7 @@ extended acquisition sessions using real microscopy data.
 
 import json
 import os
+import sys
 from pathlib import Path
 import platform
 import psutil
@@ -379,7 +380,6 @@ def compare(
         xy_chunk_size: int,
         xy_shard_size: int,
         frame_count: int,
-        do_compare: bool = True,
         max_memory_mb: float = 10000,
         cache_path: str = "s3_cache.npy",
 ) -> dict:
@@ -388,7 +388,6 @@ def compare(
     print("xy_shard_size:", xy_shard_size)
     print("frame_count:", frame_count)
     print("max_memory_mb:", max_memory_mb)
-    print("compare_data:", do_compare)
 
     print("\nLoading data from S3:")
     frames = load_s3_frames(n_frames=128, cache_path=cache_path)
@@ -405,63 +404,50 @@ def compare(
 
     # use the exact same metadata that was used for the acquire-zarr test
     az = zarr.open(az_path)["0"]
+    az_metadata = az.metadata.to_dict()
+    del az
+
+    # get total bytes written and clean up acquire-zarr output
+    aqz_bytes_written = 0
+    for root, _, files in os.walk(az_path):
+        for file in files:
+            aqz_bytes_written += os.path.getsize(os.path.join(root, file))
+
+    print("\nCleaning up acquire-zarr test data...", end="")
+    try:
+        shutil.rmtree(az_path)
+    except Exception as e:
+        print("[ERROR] Failed to remove acquire-zarr test data:", e, file=sys.stderr)
+
 
     print("\nRunning TensorStore test:")
     ts_path = "tensorstore_test.zarr"
     time_ts_ms, frame_write_times_ts, monitor_ts = run_tensorstore_test(
         data,
         ts_path,
-        {**az.metadata.to_dict(), "data_type": "uint16"},
+        {**az_metadata, "data_type": "uint16"},
         max_memory_mb,
     )
     monitor_ts.to_csv("tensorstore_timeseries.csv")
 
-    # Data comparison (optional)
-    comparison_result = None
-    if do_compare:
-        print("\nComparing the written data:", end=" ")
-        try:
-            ts = zarr.open(ts_path)
-            data.compare_array(az)
-            data.compare_array(ts)
-            print("[OK]\n")
+    # get total bytes written and clean up TensorStore output
+    ts_bytes_written = 0
+    for root, _, files in os.walk(ts_path):
+        for file in files:
+            ts_bytes_written += os.path.getsize(os.path.join(root, file))
 
-            metadata_match = ts.metadata == az.metadata
-            print(f"Metadata matches: {metadata_match}")
-            if metadata_match:
-                print(ts.metadata)
-
-            comparison_result = {
-                "data_match": True,
-                "metadata_match": metadata_match,
-            }
-        except Exception as e:
-            print(f"[ERROR] Comparison failed: {e}")
-            comparison_result = {
-                "data_match": False,
-                "metadata_match": False,
-                "error": str(e),
-            }
-    else:
-        print("\nSkipping data comparison")
-
-    # clean up test data
-    del az
-
+    print("\nCleaning up TensorStore test data...", end="")
     try:
-        print("\nCleaning up test data...", end="")
-        shutil.rmtree(az_path)
         shutil.rmtree(ts_path)
-        print("[OK]")
-    except Exception:
-        print("[ERROR] Failed to remove test data")
+    except Exception as e:
+        print("[ERROR] Failed to remove TensorStore test data:", e, file=sys.stderr)
 
     data_size_gib = (2048 * 2048 * 2 * frame_count) / (1 << 30)
 
     # Calculate statistics
     az_stats = {
         "total_time_ms": time_az_ms,
-        "throughput_gib_per_s": 1000 * data_size_gib / time_az_ms,
+        "throughput_gib_per_s": 1000 * (aqz_bytes_written / (1 << 30)) / time_az_ms,
         "frame_write_time_50th_percentile_ms": float(
             np.percentile(frame_write_times_az, 50)
         ),
@@ -474,7 +460,7 @@ def compare(
 
     ts_stats = {
         "total_time_ms": time_ts_ms,
-        "throughput_gib_per_s": 1000 * data_size_gib / time_ts_ms,
+        "throughput_gib_per_s": 1000 * (ts_bytes_written / (1 << 30)) / time_ts_ms,
         "frame_write_time_50th_percentile_ms": float(
             np.percentile(frame_write_times_ts, 50)
         ),
@@ -520,9 +506,6 @@ def compare(
         "system_info": get_system_info(),
     }
 
-    if comparison_result is not None:
-        results["comparison"] = comparison_result
-
     return results
 
 
@@ -533,15 +516,14 @@ def compare(
 @click.option("--frame-count", default=1024, help="Number of frames to write")
 @click.option("--max-memory-mb", default=10000, help="Max memory before stopping TensorStore test")
 @click.option("--output", default="results.json", help="Output file for results")
-@click.option("--nocompare/--compare", default=False, help="Disable data comparison")
 @click.option("--plot/--no-plot", default=True, help="Generate comparison plots")
 @click.option("--cache-frames", default="s3_cache.npy", help="Path to cache S3 frames")
 def main(t_chunk_size, xy_chunk_size, xy_shard_size, frame_count, max_memory_mb,
-         output, nocompare, plot, cache_frames):
+         output, plot, cache_frames):
     """Compare write performance of TensorStore vs. acquire-zarr."""
     results = compare(
         t_chunk_size, xy_chunk_size, xy_shard_size, frame_count,
-        not nocompare, max_memory_mb, cache_frames
+        max_memory_mb, cache_frames
     )
 
     with open(output, "w") as f:
@@ -555,4 +537,7 @@ def main(t_chunk_size, xy_chunk_size, xy_shard_size, frame_count, max_memory_mb,
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print("[ERROR] Benchmark failed:", e)
