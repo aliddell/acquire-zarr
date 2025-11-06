@@ -54,17 +54,6 @@ class CyclicArray:
 
         return self.data[idx]
 
-    def compare_array(self, arr: np.ndarray) -> None:
-        """Compare an array with a CyclicArray."""
-        assert self.shape == arr.shape
-
-        for i in range(0, arr.shape[0], self.t):
-            start = i
-            stop = min(i + self.t, arr.shape[0])
-            np.testing.assert_array_equal(
-                self.data[0 : (stop - start)], arr[start:stop]
-            )
-
 
 class MemoryMonitor:
     """Track memory and throughput over time."""
@@ -203,15 +192,21 @@ def run_tensorstore_test(
 def run_acquire_zarr_test(
         data: CyclicArray,
         path: str,
-        tchunk_size: int = 1,
-        xy_chunk_size: int = 2048,
-        xy_shard_size: int = 1,
+        tchunk_size: int = 128,
+        xy_chunk_size: int = 128,
+        xy_shard_size: int = 8,
 ) -> Tuple[float, np.ndarray, MemoryMonitor]:
     """Write data using acquire-zarr and track memory."""
     settings = aqz.StreamSettings(
         store_path=path,
         arrays=[
             aqz.ArraySettings(
+                compression=aqz.CompressionSettings(
+                    compressor=aqz.Compressor.BLOSC1,
+                    codec=aqz.CompressionCodec.BLOSC_LZ4,
+                    level=3,
+                    shuffle=1,
+                ),
                 dimensions=[
                     aqz.Dimension(
                         name="t",
@@ -510,9 +505,9 @@ def compare(
 
 
 @click.command()
-@click.option("--t-chunk-size", default=64, help="Time dimension chunk size")
-@click.option("--xy-chunk-size", default=64, help="Spatial dimension chunk size")
-@click.option("--xy-shard-size", default=16, help="Spatial dimension shard size")
+@click.option("--t-chunk-size", default=128, help="Time dimension chunk size")
+@click.option("--xy-chunk-size", default=128, help="Spatial dimension chunk size")
+@click.option("--xy-shard-size", default=8, help="Spatial dimension shard size")
 @click.option("--frame-count", default=1024, help="Number of frames to write")
 @click.option("--max-memory-mb", default=10000, help="Max memory before stopping TensorStore test")
 @click.option("--output", default="results.json", help="Output file for results")
