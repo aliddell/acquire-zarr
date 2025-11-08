@@ -1,0 +1,64 @@
+#pragma once
+
+#include "array.dimensions.hh"
+#include "locked.buffer.hh"
+#include "thread.pool.hh"
+
+#include <memory>
+#include <unordered_set>
+#include <vector>
+
+namespace zarr {
+struct ShardConfig
+{
+    uint32_t shard_index;
+    std::shared_ptr<ArrayDimensions> dims;
+    std::string path;
+};
+
+class Shard
+{
+  public:
+    Shard(ShardConfig&& config, std::shared_ptr<ThreadPool> thread_pool);
+    virtual ~Shard() = default;
+
+    [[nodiscard]] size_t write_frame(const std::vector<uint8_t>& frame);
+
+    /**
+     * @brief Close the shard file.
+     * @return True if successfully closed, otherwise false.
+     */
+    [[nodiscard]] bool close();
+
+  protected:
+    ShardConfig config_;
+    std::shared_ptr<ThreadPool> thread_pool_;
+
+    uint64_t frames_written_;
+    uint64_t frames_per_layer_;
+    uint64_t layers_per_shard_;
+
+    std::vector<uint32_t> chunk_indices_;
+    std::vector<std::vector<uint8_t>> chunks_;
+    std::unordered_set<uint32_t> active_chunks_;
+
+    std::vector<uint64_t> offsets_;
+    std::vector<uint64_t> extents_;
+
+    uint64_t file_offset_;
+    uint32_t current_layer_;
+
+    /**
+     * @brief Close the current layer, flush chunks, write the table, and
+     * increment the current layer.
+     * @return
+     */
+    [[nodiscard]] bool close_current_layer_();
+
+    /**
+     * @brief
+     * @return
+     */
+    [[nodiscard]] virtual bool flush_chunks_() = 0;
+};
+} // namespace zarr

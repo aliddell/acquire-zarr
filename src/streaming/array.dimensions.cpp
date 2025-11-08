@@ -41,6 +41,12 @@ ArrayDimensions::ndims() const
     return dims_.size();
 }
 
+size_t
+ArrayDimensions::bytes_of_type() const
+{
+    return zarr::bytes_of_type(dtype_);
+}
+
 const ZarrDimension&
 ArrayDimensions::operator[](size_t idx) const
 {
@@ -120,9 +126,8 @@ ArrayDimensions::tile_group_offset(uint64_t frame_id) const
 uint64_t
 ArrayDimensions::chunk_internal_offset(uint64_t frame_id) const
 {
-    const auto tile_size = zarr::bytes_of_type(dtype_) *
-                           width_dim().chunk_size_px *
-                           height_dim().chunk_size_px;
+    const auto tile_size =
+      bytes_of_type() * width_dim().chunk_size_px * height_dim().chunk_size_px;
 
     uint64_t offset = 0;
     std::vector<uint64_t> array_strides(ndims() - 2, 1),

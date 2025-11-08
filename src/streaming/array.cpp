@@ -125,7 +125,7 @@ zarr::Array::write_frame(LockedBuffer& data)
 
     // split the incoming frame into tiles and write them to the chunk
     // buffers
-    const auto bytes_written = write_frame_to_chunks_(data);
+    const auto bytes_written = write_frame_to_shards_(data);
     EXPECT(bytes_written == nbytes_data, "Failed to write frame to chunks");
 
     LOG_DEBUG("Wrote ",
@@ -434,12 +434,11 @@ zarr::Array::fill_buffers_()
 }
 
 size_t
-zarr::Array::write_frame_to_chunks_(LockedBuffer& data)
+zarr::Array::write_frame_to_shards_(LockedBuffer& data)
 {
     // break the frame into tiles and write them to the chunk buffers
-    const auto bytes_per_px = bytes_of_type(config_->dtype);
-
     const auto& dimensions = config_->dimensions;
+    const auto bytes_per_px = dimensions->bytes_of_type();
 
     const auto& x_dim = dimensions->width_dim();
     const auto frame_cols = x_dim.array_size_px;

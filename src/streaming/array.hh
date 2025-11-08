@@ -57,7 +57,7 @@ class Array : public ArrayBase
     bool should_flush_() const;
     bool should_rollover_() const;
 
-    size_t write_frame_to_chunks_(LockedBuffer& data);
+    size_t write_frame_to_shards_(LockedBuffer& data);
 
     [[nodiscard]] ByteVector consolidate_chunks_(uint32_t shard_index);
     [[nodiscard]] bool compress_and_flush_data_();

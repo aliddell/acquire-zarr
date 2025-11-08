@@ -44,6 +44,12 @@ add_library(${tgt}
         multiscale.array.cpp
         plate.hh
         plate.cpp
+        shard.hh
+        shard.cpp
+        fs.shard.hh
+        fs.shard.cpp
+        s3.shard.hh
+        s3.shard.cpp
         $<TARGET_OBJECTS:acquire-logger-obj>
 )
 

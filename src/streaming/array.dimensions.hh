@@ -48,6 +48,7 @@ class ArrayDimensions
     ArrayDimensions(std::vector<ZarrDimension>&& dims, ZarrDataType dtype);
 
     size_t ndims() const;
+    size_t bytes_of_type() const;
 
     const ZarrDimension& operator[](size_t idx) const;
     const ZarrDimension& at(size_t idx) const { return operator[](idx); }
@@ -115,7 +116,8 @@ class ArrayDimensions
     uint32_t chunk_layers_per_shard() const;
 
     /**
-     * @brief Get the shard index for a given chunk index, given array dimensions.
+     * @brief Get the shard index for a given chunk index, given array
+     * dimensions.
      * @param chunk_index The index of the chunk.
      * @return The index of the shard containing the chunk.
      */
