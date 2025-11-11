@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <set>
 #include <vector>
 
 struct ZarrDimension
@@ -21,10 +22,10 @@ struct ZarrDimension
                   double scale = 1.0)
       : name(name)
       , type(type)
+      , scale(scale)
       , array_size_px(array_size_px)
       , chunk_size_px(chunk_size_px)
       , shard_size_chunks(shard_size_chunks)
-      , scale(scale)
     {
         if (!unit.empty()) {
             this->unit = unit;
@@ -84,6 +85,17 @@ class ArrayDimensions
     uint64_t chunk_internal_offset(uint64_t frame_id) const;
 
     /**
+     * @brief Check whether the frame with ID @p frame_id is written to chunks
+     * in the shard @p shard_index.
+     * @param frame_id The frame ID.
+     * @param shard_index The index of the shard to check.
+     * @return True if the frame is written to chunks within the shard,
+     * otherwise false.
+     */
+    [[nodiscard]] bool frame_in_shard(uint64_t frame_id,
+                                      uint32_t shard_index) const;
+
+    /**
      * @brief Get the number of chunks to hold in memory.
      * @return The number of chunks to buffer before writing out.
      */
@@ -128,8 +140,7 @@ class ArrayDimensions
      * @param shard_index The index of the shard.
      * @return A vector of chunk indices corresponding to the shard.
      */
-    const std::vector<uint32_t>& chunk_indices_for_shard(
-      uint32_t shard_index) const;
+    std::vector<uint32_t> chunk_indices_for_shard(uint32_t shard_index) const;
 
     /**
      * @brief Get the chunk indices for a specific layer within a shard.
@@ -159,7 +170,7 @@ class ArrayDimensions
 
     std::unordered_map<uint32_t, uint32_t> shard_indices_;
     std::unordered_map<uint32_t, uint32_t> shard_internal_indices_;
-    std::vector<std::vector<uint32_t>> chunk_indices_for_shard_;
+    std::vector<std::set<uint32_t>> chunk_indices_for_shard_;
 
     uint32_t shard_index_for_chunk_(uint32_t chunk_index) const;
     uint32_t shard_internal_index_(uint32_t chunk_index) const;

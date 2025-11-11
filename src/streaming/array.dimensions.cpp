@@ -31,7 +31,7 @@ ArrayDimensions::ArrayDimensions(std::vector<ZarrDimension>&& dims,
         shard_indices_.insert_or_assign(i, shard_index);
         shard_internal_indices_.insert_or_assign(i, shard_internal_index_(i));
 
-        chunk_indices_for_shard_[shard_index].push_back(i);
+        chunk_indices_for_shard_[shard_index].emplace(i);
     }
 }
 
@@ -90,11 +90,12 @@ ArrayDimensions::chunk_lattice_index(uint64_t frame_id,
         return frame_id / divisor;
     }
 
-    size_t mod_divisor = 1, div_divisor = 1;
-    for (auto i = dim_index; i < ndims() - 2; ++i) {
+    size_t mod_divisor = dims_[dim_index].array_size_px;
+    size_t div_divisor = dims_[dim_index].chunk_size_px;
+    for (auto i = dim_index + 1; i < ndims() - 2; ++i) {
         const auto& dim = dims_[i];
         mod_divisor *= dim.array_size_px;
-        div_divisor *= (i == dim_index ? dim.chunk_size_px : dim.array_size_px);
+        div_divisor *= dim.array_size_px;
     }
 
     CHECK(mod_divisor);
@@ -154,6 +155,16 @@ ArrayDimensions::chunk_internal_offset(uint64_t frame_id) const
     return offset * tile_size;
 }
 
+bool
+ArrayDimensions::frame_in_shard(uint64_t frame_id, uint32_t shard_index) const
+{
+    const auto group_offset = tile_group_offset(frame_id);
+    const auto& chunk_indices = chunk_indices_for_shard_.at(shard_index);
+
+    return std::ranges::find(chunk_indices, group_offset) !=
+           chunk_indices.end();
+}
+
 uint32_t
 ArrayDimensions::number_of_chunks_in_memory() const
 {
@@ -190,10 +201,11 @@ ArrayDimensions::shard_index_for_chunk(uint32_t chunk_index) const
     return shard_indices_.at(chunk_index);
 }
 
-const std::vector<uint32_t>&
+std::vector<uint32_t>
 ArrayDimensions::chunk_indices_for_shard(uint32_t shard_index) const
 {
-    return chunk_indices_for_shard_.at(shard_index);
+    const auto& indices = chunk_indices_for_shard_.at(shard_index);
+    return { indices.begin(), indices.end() };
 }
 
 std::vector<uint32_t>
@@ -204,10 +216,10 @@ ArrayDimensions::chunk_indices_for_shard_layer(uint32_t shard_index,
     const auto chunks_per_layer = number_of_chunks_in_memory_;
 
     std::vector<uint32_t> indices;
-    indices.reserve(chunks_per_shard_);
+    indices.reserve(chunks_per_shard_ / dims_[0].shard_size_chunks);
 
     for (const auto& idx : chunk_indices) {
-        if ((idx / chunks_per_layer) == layer) {
+        if (idx / chunks_per_layer == layer) {
             indices.push_back(idx);
         }
     }
