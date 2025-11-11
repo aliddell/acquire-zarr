@@ -5,6 +5,7 @@
 #include "thread.pool.hh"
 
 #include <memory>
+#include <span>
 #include <unordered_set>
 #include <vector>
 
@@ -22,7 +23,14 @@ class Shard
     Shard(ShardConfig&& config, std::shared_ptr<ThreadPool> thread_pool);
     virtual ~Shard() = default;
 
-    [[nodiscard]] size_t write_frame(const std::vector<uint8_t>& frame);
+    /**
+     * @brief Write a frame to this shard.
+     * @param frame The frame to write.
+     * @param frame_id The ID of the frame to write.
+     * @return The number of bytes written.
+     */
+    [[nodiscard]] size_t write_frame(const std::span<uint8_t>& frame,
+                                     uint64_t frame_id);
 
     /**
      * @brief Close the shard file.
@@ -34,13 +42,11 @@ class Shard
     ShardConfig config_;
     std::shared_ptr<ThreadPool> thread_pool_;
 
-    uint64_t frames_written_;
     uint64_t frames_per_layer_;
+    uint64_t chunks_per_layer_;
     uint64_t layers_per_shard_;
 
-    std::vector<uint32_t> chunk_indices_;
-    std::vector<std::vector<uint8_t>> chunks_;
-    std::unordered_set<uint32_t> active_chunks_;
+    std::unordered_map<uint32_t, std::vector<uint8_t>> chunks_;
 
     std::vector<uint64_t> offsets_;
     std::vector<uint64_t> extents_;

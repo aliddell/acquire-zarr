@@ -27,6 +27,8 @@ set(tests
         downsampler
         downsampler-odd-z
         plate
+        shard-write-frame
+        shard-flush
 )
 
 foreach (name ${tests})
