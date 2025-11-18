@@ -42,6 +42,22 @@ get_max_active_handles()
 }
 
 void*
+init_handle(const std::string& filename)
+{
+    constexpr int flags = O_WRONLY | O_CREAT;
+
+    auto* fd = new int;
+    *fd = open(filename.data(), flags, 0644);
+    if (*fd < 0) {
+        const auto err = get_last_error_as_string();
+        delete fd;
+        throw std::runtime_error("Failed to open file: '" +
+                                 std::string(filename) + "': " + err);
+    }
+    return fd;
+}
+
+void*
 init_handle(const std::string& filename, void* flags)
 {
     auto* fd = new int;

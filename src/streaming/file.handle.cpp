@@ -4,6 +4,9 @@
 #include <chrono>
 
 void*
+init_handle(const std::string& filename);
+
+void*
 init_handle(const std::string& filename, void* flags);
 
 void
@@ -50,6 +53,22 @@ zarr::FileHandlePool::get_handle(const std::string& filename, void* flags)
     return std::make_unique<FileHandle>(filename, flags);
 }
 
+std::shared_ptr<void>
+zarr::FileHandlePool::get_shared_handle(const std::string& filename)
+{
+    std::unique_lock lock(mutex_);
+    if (const auto it = handles_.find(filename); it != handles_.end()) {
+        return it->second;
+    }
+
+    while (handles_.size() > max_active_handles_) {
+        cv_.wait(lock, [this]() {
+            cull_unused_handles_();
+            return handles_.size() > max_active_handles_;
+        });
+    }
+}
+
 void
 zarr::FileHandlePool::return_handle(std::unique_ptr<FileHandle>&& handle)
 {
@@ -61,4 +80,26 @@ zarr::FileHandlePool::return_handle(std::unique_ptr<FileHandle>&& handle)
 
     // handle will be destroyed when going out of scope
     flush_file(handle->get());
+}
+
+void
+zarr::FileHandlePool::cull_unused_handles_()
+{
+    std::unique_lock lock(mutex_);
+    if (handles_.empty()) {
+        return;
+    }
+
+    std::vector<std::string> erase_me;
+    for (const auto& [key, handle] : handles_) {
+        if (handle.use_count() == 1) {
+            erase_me.emplace_back(key);
+        }
+    }
+
+    for (const auto& key : erase_me) {
+        handles_.erase(key);
+    }
+
+    cv_.notify_all();
 }

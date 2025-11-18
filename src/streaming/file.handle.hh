@@ -57,6 +57,8 @@ class FileHandlePool
     std::unique_ptr<FileHandle> get_handle(const std::string& filename,
                                            void* flags);
 
+    std::shared_ptr<void> get_shared_handle(const std::string& filename);
+
     /**
      * @brief Return a file handle to the pool.
      * @details This function should be called when a file handle is no longer
@@ -70,5 +72,9 @@ class FileHandlePool
     std::atomic<uint64_t> n_active_handles_;
     std::mutex mutex_;
     std::condition_variable cv_;
+
+    std::unordered_map<std::string, std::shared_ptr<void>> handles_;
+
+    void cull_unused_handles_();
 };
 } // namespace zarr
