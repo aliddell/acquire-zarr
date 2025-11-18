@@ -1,13 +1,11 @@
 #include "definitions.hh"
 #include "file.handle.hh"
+#include "macros.hh"
 
 #include <chrono>
 
 void*
 init_handle(const std::string& filename);
-
-void*
-init_handle(const std::string& filename, void* flags);
 
 void
 destroy_handle(void* handle);
@@ -18,8 +16,8 @@ flush_file(void* handle);
 uint64_t
 get_max_active_handles();
 
-zarr::FileHandle::FileHandle(const std::string& filename, void* flags)
-  : handle_(init_handle(filename, flags))
+zarr::FileHandle::FileHandle(const std::string& filename)
+  : handle_(init_handle(filename))
 {
 }
 

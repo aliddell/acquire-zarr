@@ -34,21 +34,6 @@ get_last_error_as_string()
     return message;
 }
 
-void*
-make_flags()
-{
-    auto* flags = new DWORD;
-    *flags = FILE_FLAG_OVERLAPPED;
-    return flags;
-}
-
-void
-destroy_flags(void* flags)
-{
-    const auto* fd = static_cast<DWORD*>(flags);
-    delete fd;
-}
-
 uint64_t
 get_max_active_handles()
 {
@@ -56,15 +41,17 @@ get_max_active_handles()
 }
 
 void*
-init_handle(const std::string& filename, void* flags)
+init_handle(const std::string& filename)
 {
+    constexpr DWORD flags = FILE_FLAG_OVERLAPPED;
+
     auto* fd = new HANDLE;
     *fd = CreateFileA(filename.c_str(),
                       GENERIC_WRITE,
                       0, // No sharing
                       nullptr,
                       OPEN_ALWAYS,
-                      *static_cast<DWORD*>(flags),
+                      flags,
                       nullptr);
 
     if (*fd == INVALID_HANDLE_VALUE) {
@@ -121,7 +108,8 @@ bool
 flush_file(void* handle)
 {
     CHECK(handle);
-    if (const auto* fd = static_cast<HANDLE*>(handle); *fd != INVALID_HANDLE_VALUE) {
+    if (const auto* fd = static_cast<HANDLE*>(handle);
+        *fd != INVALID_HANDLE_VALUE) {
         return FlushFileBuffers(*fd);
     }
     return true;

@@ -15,21 +15,6 @@ get_last_error_as_string()
     return strerror(errno);
 }
 
-void*
-make_flags()
-{
-    auto* flags = new int;
-    *flags = O_WRONLY | O_CREAT;
-    return flags;
-}
-
-void
-destroy_flags(void* flags)
-{
-    const auto* fd = static_cast<int*>(flags);
-    delete fd;
-}
-
 uint64_t
 get_max_active_handles()
 {

@@ -4,6 +4,7 @@
 #include <memory> // for std::unique_ptr
 #include <mutex>
 #include <string>
+#include <unordered_map>
 
 namespace zarr {
 /**
@@ -17,14 +18,11 @@ class FileHandle
     /**
      * @brief Create a new FileHandle. The file is opened with the specified
      * filename and flags.
-     * @details The flags parameter is platform-specific and should be created
-     * using the appropriate function for the platform (e.g., make_flags()).
      * The FileHandle will be closed when the object is destroyed.
      * @param filename The path to the file to open.
-     * @param flags Platform-specific flags for opening the file.
      * @throws std::runtime_error if the file cannot be opened.
      */
-    FileHandle(const std::string& filename, void* flags);
+    explicit FileHandle(const std::string& filename);
     ~FileHandle();
 
     /**
