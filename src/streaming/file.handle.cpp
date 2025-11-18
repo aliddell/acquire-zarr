@@ -34,70 +34,76 @@ zarr::FileHandle::get() const
 
 zarr::FileHandlePool::FileHandlePool()
   : max_active_handles_(get_max_active_handles())
-  , n_active_handles_(0)
 {
 }
 
-std::unique_ptr<zarr::FileHandle>
-zarr::FileHandlePool::get_handle(const std::string& filename, void* flags)
+zarr::FileHandlePool::~FileHandlePool()
 {
+    // wait until the pool has been drained
     std::unique_lock lock(mutex_);
-    if (n_active_handles_ >= max_active_handles_) {
-        cv_.wait(lock,
-                 [this]() { return n_active_handles_ < max_active_handles_; });
+    while (!handle_map_.empty()) {
+        if (!evict_idle_handle_()) {
+            cv_.wait(lock, [&] { return true; });
+        }
     }
-    ++n_active_handles_;
-
-    return std::make_unique<FileHandle>(filename, flags);
 }
 
 std::shared_ptr<void>
-zarr::FileHandlePool::get_shared_handle(const std::string& filename)
+zarr::FileHandlePool::get_handle(const std::string& filename)
 {
     std::unique_lock lock(mutex_);
-    if (const auto it = handles_.find(filename); it != handles_.end()) {
-        return it->second;
+    if (const auto it = handle_map_.find(filename); it != handle_map_.end()) {
+        if (auto handle = it->second->second.lock()) {
+            // move to front of list
+            handles_.splice(handles_.begin(), handles_, it->second);
+            return handle;
+        }
+
+        // expired, remove from list and map
+        handles_.erase(it->second);
+        handle_map_.erase(it);
     }
 
-    while (handles_.size() > max_active_handles_) {
-        cv_.wait(lock, [this]() {
-            cull_unused_handles_();
-            return handles_.size() > max_active_handles_;
-        });
-    }
+    cv_.wait(lock, [&] { return handles_.size() < max_active_handles_; });
+    std::shared_ptr<void> handle(init_handle(filename), [](void* h) {
+        flush_file(h);
+        destroy_handle(h);
+    });
+
+    EXPECT(handle != nullptr, "Failed to create file handle for " + filename);
+
+    handles_.emplace_front(filename, handle);
+    handle_map_.emplace(filename, handles_.begin());
+
+    return handle;
 }
 
 void
-zarr::FileHandlePool::return_handle(std::unique_ptr<FileHandle>&& handle)
+zarr::FileHandlePool::close_handle(const std::string& filename)
 {
     std::unique_lock lock(mutex_);
-
-    if (handle != nullptr && n_active_handles_ > 0) {
-        --n_active_handles_;
+    if (const auto it = handle_map_.find(filename); it != handle_map_.end()) {
+        handles_.erase(it->second);
+        handle_map_.erase(it);
+        cv_.notify_all();
     }
-
-    // handle will be destroyed when going out of scope
-    flush_file(handle->get());
 }
 
-void
-zarr::FileHandlePool::cull_unused_handles_()
+bool
+zarr::FileHandlePool::evict_idle_handle_()
 {
-    std::unique_lock lock(mutex_);
-    if (handles_.empty()) {
-        return;
-    }
-
-    std::vector<std::string> erase_me;
-    for (const auto& [key, handle] : handles_) {
-        if (handle.use_count() == 1) {
-            erase_me.emplace_back(key);
+    bool evicted = false;
+    for (auto it = handles_.begin(); it != handles_.end();) {
+        if (it->second.expired()) {
+            handle_map_.erase(it->first);
+            it = handles_.erase(it);
+            evicted = true;
         }
     }
 
-    for (const auto& key : erase_me) {
-        handles_.erase(key);
+    if (evicted) {
+        cv_.notify_all();
     }
 
-    cv_.notify_all();
+    return evicted;
 }
