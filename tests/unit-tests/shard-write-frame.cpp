@@ -21,7 +21,7 @@ class TestShard : public zarr::Shard
     size_t flush_count() const { return flush_count_; }
 
   protected:
-    bool flush_chunks_() override
+    bool compress_and_flush_chunks_() override
     {
         ++flush_count_;
         return true;

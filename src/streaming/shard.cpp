@@ -145,7 +145,7 @@ zarr::Shard::write_frame(const std::span<uint8_t>& frame, uint64_t frame_id)
 bool
 zarr::Shard::close()
 {
-    if (!flush_chunks_()) {
+    if (!compress_and_flush_chunks_()) {
         LOG_ERROR("Failed to flush chunks.");
         return false;
     }
@@ -156,7 +156,7 @@ zarr::Shard::close()
 bool
 zarr::Shard::close_current_layer_()
 {
-    if (!flush_chunks_()) {
+    if (!compress_and_flush_chunks_()) {
         LOG_ERROR("Failed to flush chunks");
         return false;
     }

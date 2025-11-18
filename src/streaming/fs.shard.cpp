@@ -7,7 +7,7 @@ zarr::FSShard::FSShard(ShardConfig&& config,
 }
 
 bool
-zarr::FSShard::flush_chunks_()
+zarr::FSShard::compress_and_flush_chunks_()
 {
     return false;
 }

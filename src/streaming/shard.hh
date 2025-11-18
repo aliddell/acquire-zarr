@@ -65,6 +65,6 @@ class Shard
      * @brief
      * @return
      */
-    [[nodiscard]] virtual bool flush_chunks_() = 0;
+    [[nodiscard]] virtual bool compress_and_flush_chunks_() = 0;
 };
 } // namespace zarr

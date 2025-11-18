@@ -10,5 +10,6 @@ class FSShard : public Shard
 
   protected:
     bool flush_chunks_() override;
+    bool compress_and_flush_chunks_() override;
 };
 } // namespace zarr
