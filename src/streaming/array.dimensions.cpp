@@ -2,6 +2,9 @@
 #include "macros.hh"
 #include "zarr.common.hh"
 
+#include <algorithm>
+#include <array>
+#include <span>
 #include <tuple>
 #include <unordered_map>
 
@@ -470,36 +473,40 @@ ArrayDimensions::transpose_frame_id(uint64_t frame_id) const
     // Use stack-allocated arrays for common case (most acquisitions have 3-7
     // dimensions). This avoids heap allocations on every frame write.
     constexpr size_t kMaxStackDims = 8;
-    uint64_t acq_coords_stack[kMaxStackDims];
-    uint64_t stor_coords_stack[kMaxStackDims];
-    uint64_t acq_strides_stack[kMaxStackDims];
-    uint64_t stor_strides_stack[kMaxStackDims];
-
-    uint64_t* acq_coords = acq_coords_stack;
-    uint64_t* stor_coords = stor_coords_stack;
-    uint64_t* acq_strides = acq_strides_stack;
-    uint64_t* stor_strides = stor_strides_stack;
+    std::array<uint64_t, kMaxStackDims> acq_coords_stack{};
+    std::array<uint64_t, kMaxStackDims> stor_coords_stack{};
+    std::array<uint64_t, kMaxStackDims> acq_strides_stack{};
+    std::array<uint64_t, kMaxStackDims> stor_strides_stack{};
 
     // Fallback to heap allocation for unusual cases with many dimensions
-    std::vector<uint64_t> acq_coords_heap, stor_coords_heap;
-    std::vector<uint64_t> acq_strides_heap, stor_strides_heap;
+    std::vector<uint64_t> acq_coords_heap;
+    std::vector<uint64_t> stor_coords_heap;
+    std::vector<uint64_t> acq_strides_heap;
+    std::vector<uint64_t> stor_strides_heap;
+
+    std::span<uint64_t> acq_coords(acq_coords_stack);
+    std::span<uint64_t> stor_coords(stor_coords_stack);
+    std::span<uint64_t> acq_strides(acq_strides_stack);
+    std::span<uint64_t> stor_strides(stor_strides_stack);
 
     if (n > kMaxStackDims) {
         acq_coords_heap.resize(n);
         stor_coords_heap.resize(n);
-        acq_strides_heap.resize(n, 1);
-        stor_strides_heap.resize(n, 1);
-        acq_coords = acq_coords_heap.data();
-        stor_coords = stor_coords_heap.data();
-        acq_strides = acq_strides_heap.data();
-        stor_strides = stor_strides_heap.data();
+        acq_strides_heap.resize(n);
+        stor_strides_heap.resize(n);
+        acq_coords = std::span(acq_coords_heap);
+        stor_coords = std::span(stor_coords_heap);
+        acq_strides = std::span(acq_strides_heap);
+        stor_strides = std::span(stor_strides_heap);
     } else {
-        // Initialize stack arrays
-        for (size_t i = 0; i < n; ++i) {
-            acq_strides[i] = 1;
-            stor_strides[i] = 1;
-        }
+        acq_coords = acq_coords.first(n);
+        stor_coords = stor_coords.first(n);
+        acq_strides = acq_strides.first(n);
+        stor_strides = stor_strides.first(n);
     }
+
+    std::ranges::fill(acq_strides, 1);
+    std::ranges::fill(stor_strides, 1);
 
     // Step 1: Calculate strides in acquisition order for every frame-addressable
     // axis (all dimensions except the trailing plane axes). frame_id enumerates
