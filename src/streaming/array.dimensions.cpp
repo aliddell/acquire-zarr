@@ -409,6 +409,7 @@ ArrayDimensions::needs_transposition() const
     return transpose_state_ != nullptr;
 }
 
+// Transpose a frame ID from acquisition order to output dimension_order
 uint64_t
 ArrayDimensions::transpose_frame_id(uint64_t frame_id) const
 {
