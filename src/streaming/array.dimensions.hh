@@ -202,7 +202,6 @@ class ArrayDimensions
         std::vector<ZarrDimension> acquisition_dims;  // Original acquisition order
         std::vector<size_t> acq_to_canonical;         // Maps acq index -> canonical index
         std::vector<size_t> canonical_to_acq;         // Maps canonical index -> acq index
-        // Future: pre-computed frame_id lookup table
     };
 
     std::vector<ZarrDimension> dims_; // Dimensions in storage order

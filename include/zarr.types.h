@@ -137,9 +137,11 @@ extern "C"
      * and freed with ZarrArraySettings_destroy_dimension_array. The order in which you
      * set the dimension properties in the array should match the order of the dimensions
      * from slowest to fastest changing, for example, [Z, Y, X] for a 3D dataset.
-     * @note To enable automatic dimension reordering (e.g., for OME-NGFF compliance),
-     * set dimension_order to an array of dimension names in the desired output order.
-     * If dimension_order is NULL, dimensions will be stored in the order provided.
+     * @note To enable automatic dimension reordering (e.g., for OME-NGFF compliance, which
+     * currently requires TCZYX order), set dimension_order to an array of dimension names
+     * in the desired output order. MUST match the names in the dimensions array.
+     * If dimension_order is NULL, dimensions will be stored in the order provided. 
+     * @note dimension_order_count should equal dimension_count if dimension_order is non-NULL.
      */
     typedef struct
     {
@@ -150,14 +152,8 @@ extern "C"
         ZarrDataType data_type;
         bool multiscale;
         ZarrDownsamplingMethod downsampling_method;
-        const char** dimension_order; /**< Optional: Array of dimension names in
-                                           desired output order. Must match the names
-                                           in the dimensions array. NULL to disable
-                                           reordering. */
-        size_t dimension_order_count; /**< Number of dimension names in
-                                           dimension_order. Should equal
-                                           dimension_count if dimension_order is
-                                           non-NULL. */
+        const char** dimension_order;
+        size_t dimension_order_count;
     } ZarrArraySettings;
 
     /**

@@ -404,6 +404,11 @@ ArrayDimensions::transpose_frame_id(uint64_t frame_id) const
         return frame_id;
     }
 
+    // NOTE: 
+    // We could potentially pre-compute a lookup table for frame_id transposition,
+    // but only for fixed-size dimensions. (Append dimensions would still need
+    // on-the-fly computation?).  Opted for simpler on-the-fly computation for now.
+
     const auto n = ndims();
 
     // Use stack-allocated arrays for common case (most acquisitions have 3-7
@@ -440,9 +445,8 @@ ArrayDimensions::transpose_frame_id(uint64_t frame_id) const
         }
     }
 
-    // Step 1: Calculate strides in acquisition order (only for non-spatial
-    // dims) frame_id encodes non-spatial dimensions only. The last two dims
-    // are spatial (Y, X).
+    // Step 1: Calculate strides in acquisition order (only for non-spatial dims)
+    // frame_id encodes non-spatial dimensions only. The last two dims are spatial (Y, X).
     if (n > 2) {
         acq_strides[n - 3] = 1;
         for (int i = static_cast<int>(n) - 4; i >= 0; --i) {
@@ -451,8 +455,7 @@ ArrayDimensions::transpose_frame_id(uint64_t frame_id) const
         }
     }
 
-    // Step 2: Convert linear frame_id to multi-dimensional coordinates in
-    // acquisition order
+    // Step 2: Convert linear frame_id to multi-dimensional coordinates in acquisition order
     uint64_t remaining = frame_id;
     for (size_t i = 0; i < n - 2; ++i) {
         acq_coords[i] = remaining / acq_strides[i];
