@@ -31,6 +31,7 @@ struct ArrayLifetimeProps
     std::vector<uint32_t> array_sizes;
     std::vector<uint32_t> chunk_sizes;
     std::vector<uint32_t> shard_sizes;
+    std::vector<std::string> dimension_order;  // Optional: target dimension order
 
     ZarrCompressionSettings compression;
     bool has_compression{ false };
@@ -78,11 +79,26 @@ struct ArrayLifetimeProps
         array_settings_.downsampling_method =
           downsampling_method.value_or(ZarrDownsamplingMethod_Mean);
 
+        // Set dimension order if provided
+        if (!dimension_order.empty()) {
+            dimension_order_ptrs_.clear();
+            dimension_order_ptrs_.reserve(dimension_order.size());
+            for (const auto& name : dimension_order) {
+                dimension_order_ptrs_.push_back(name.c_str());
+            }
+            array_settings_.dimension_order = dimension_order_ptrs_.data();
+            array_settings_.dimension_order_count = dimension_order_ptrs_.size();
+        } else {
+            array_settings_.dimension_order = nullptr;
+            array_settings_.dimension_order_count = 0;
+        }
+
         return &array_settings_;
     }
 
   private:
     ZarrArraySettings array_settings_{};
+    std::vector<const char*> dimension_order_ptrs_;  // Store pointers for C API
 };
 
 struct FieldOfViewLifetimeProps
@@ -560,6 +576,15 @@ class PyZarrArraySettings
         downsampling_method_ = method;
     }
 
+    const std::vector<std::string>& dimension_order() const
+    {
+        return dimension_order_;
+    }
+    void set_dimension_order(const std::vector<std::string>& order)
+    {
+        dimension_order_ = order;
+    }
+
     ArrayLifetimeProps to_lifetime_props() const
     {
         ArrayLifetimeProps lt_props{};
@@ -601,6 +626,9 @@ class PyZarrArraySettings
             lt_props.scales[i] = dim.scale();
         }
 
+        // Pass through dimension order if specified
+        lt_props.dimension_order = dimension_order_;
+
         return lt_props;
     }
 
@@ -610,6 +638,7 @@ class PyZarrArraySettings
     std::vector<PyZarrDimensionProperties> dims_;
     ZarrDataType data_type_{ ZarrDataType_uint8 };
     std::optional<ZarrDownsamplingMethod> downsampling_method_{ std::nullopt };
+    std::vector<std::string> dimension_order_;
 };
 
 class PyZarrFieldOfView
@@ -1422,7 +1451,8 @@ PYBIND11_MODULE(acquire_zarr, m)
                     std::optional<PyZarrCompressionSettings> compression,
                     std::optional<py::list> dimensions,
                     std::optional<py::object> data_type,
-                    std::optional<ZarrDownsamplingMethod> downsampling_method) {
+                    std::optional<ZarrDownsamplingMethod> downsampling_method,
+                    std::optional<py::list> dimension_order) {
             PyZarrArraySettings settings;
 
             if (output_key) {
@@ -1460,6 +1490,14 @@ PYBIND11_MODULE(acquire_zarr, m)
             if (downsampling_method) {
                 settings.set_downsampling_method(*downsampling_method);
             }
+            if (dimension_order) {
+                auto& order_list = *dimension_order;
+                std::vector<std::string> order_vec(order_list.size());
+                for (auto i = 0; i < order_list.size(); ++i) {
+                    order_vec[i] = order_list[i].cast<std::string>();
+                }
+                settings.set_dimension_order(order_vec);
+            }
 
             return settings;
         }),
@@ -1468,7 +1506,8 @@ PYBIND11_MODULE(acquire_zarr, m)
         py::arg("compression") = std::nullopt,
         py::arg("dimensions") = std::nullopt,
         py::arg("data_type") = std::nullopt,
-        py::arg("downsampling_method") = std::nullopt)
+        py::arg("downsampling_method") = std::nullopt,
+        py::arg("dimension_order") = std::nullopt)
       .def("__repr__",
            [](const PyZarrArraySettings& self) {
                std::string repr =
@@ -1581,7 +1620,10 @@ PYBIND11_MODULE(acquire_zarr, m)
                 self.set_downsampling_method(
                   obj.cast<ZarrDownsamplingMethod>());
             }
-        });
+        })
+      .def_property("dimension_order",
+                    &PyZarrArraySettings::dimension_order,
+                    &PyZarrArraySettings::set_dimension_order);
 
     py::class_<PyZarrFieldOfView>(m, "FieldOfView", py::dynamic_attr())
       .def(py::init([](std::optional<std::string> path,

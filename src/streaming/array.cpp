@@ -461,7 +461,10 @@ zarr::Array::write_frame_to_chunks_(LockedBuffer& data)
 
     // don't take the frame id from the incoming frame, as the camera may have
     // dropped frames
-    const auto frame_id = frames_written_;
+    const auto acquisition_frame_id = frames_written_;
+
+    // Transpose frame_id from acquisition order to canonical OME-NGFF order
+    const auto frame_id = dimensions->transpose_frame_id(acquisition_frame_id);
 
     // offset among the chunks in the lattice
     const auto group_offset = dimensions->tile_group_offset(frame_id);

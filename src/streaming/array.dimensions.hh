@@ -45,7 +45,9 @@ struct ZarrDimension
 class ArrayDimensions
 {
   public:
-    ArrayDimensions(std::vector<ZarrDimension>&& dims, ZarrDataType dtype);
+    ArrayDimensions(std::vector<ZarrDimension>&& dims,
+                    ZarrDataType dtype,
+                    const std::vector<std::string>& target_dim_order = {});
 
     size_t ndims() const;
 
@@ -55,6 +57,20 @@ class ArrayDimensions
     const ZarrDimension& final_dim() const;
     const ZarrDimension& height_dim() const;
     const ZarrDimension& width_dim() const;
+
+    /**
+     * @brief Get the dimension at the given index in canonical OME-NGFF order
+     * (TCZYX).
+     * @param idx The index in canonical order.
+     * @return The dimension at the given index.
+     */
+    const ZarrDimension& canonical_dimension(size_t idx) const;
+
+    /**
+     * @brief Check if dimensions need transposition for OME-NGFF compliance.
+     * @return True if dimensions are not in canonical TCZYX order.
+     */
+    bool needs_transposition() const;
 
     /**
      * @brief Get the index of a chunk in the chunk lattice for a given frame
@@ -145,8 +161,47 @@ class ArrayDimensions
      */
     uint32_t shard_internal_index(uint32_t chunk_index) const;
 
+    /**
+     * @brief Transpose a frame ID from acquisition order to canonical OME-NGFF
+     * order.
+     *
+     * Frame IDs are linear indices that encode only non-spatial dimensions
+     * (e.g., Time, Channel, Z-depth). The spatial dimensions (Y, X) are always
+     * implicit zeros in the frame_id coordinate space, as frame_id represents
+     * which 2D image plane is being written, not individual pixels.
+     *
+     * When dimensions are provided in acquisition order (e.g., T, Z, C, Y, X),
+     * frames are written sequentially with frame_id incrementing according to
+     * that order. This function converts the acquisition frame_id to a
+     * canonical frame_id that corresponds to OME-NGFF dimension order
+     * (T, C, Z, Y, X).
+     *
+     * Example:
+     *   Acquisition order: T(size=2), Z(size=3), C(size=2), Y, X
+     *   Frame 0: T=0, Z=0, C=0 -> acquisition frame_id=0
+     *   Frame 1: T=0, Z=0, C=1 -> acquisition frame_id=1
+     *   Frame 2: T=0, Z=1, C=0 -> acquisition frame_id=2
+     *
+     *   Canonical order: T(size=2), C(size=2), Z(size=3), Y, X
+     *   The same physical frames map to:
+     *   Frame T=0,C=0,Z=0 -> canonical frame_id=0
+     *   Frame T=0,C=1,Z=0 -> canonical frame_id=3
+     *   Frame T=0,C=0,Z=1 -> canonical frame_id=1
+     *
+     *   So transpose_frame_id(1) = 3, transpose_frame_id(2) = 1, etc.
+     *
+     * @param frame_id Sequential frame counter in acquisition order.
+     * @return Sequential frame counter in canonical TCZYX order.
+     */
+    uint64_t transpose_frame_id(uint64_t frame_id) const;
+
   private:
-    std::vector<ZarrDimension> dims_;
+    std::vector<ZarrDimension> dims_; // Stored in canonical OME-NGFF order
+    std::vector<ZarrDimension> acquisition_dims_; // Original acquisition order
+    std::vector<size_t> acquisition_to_canonical_;
+    std::vector<size_t> canonical_to_acquisition_;
+    bool needs_transposition_;
+
     ZarrDataType dtype_;
 
     size_t bytes_per_chunk_;
