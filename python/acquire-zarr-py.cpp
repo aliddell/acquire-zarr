@@ -578,6 +578,16 @@ class PyZarrArraySettings
     }
     void set_dimension_order(const std::vector<std::string>& order)
     {
+        // Validate that dimension 0 is not transposed away
+        if (!order.empty() && !dims_.empty()) {
+            const std::string& first_dim_name = dims_[0].name();
+            if (order[0] != first_dim_name) {
+                throw py::type_error(
+                  "Transposing dimension 0 ('" + first_dim_name +
+                  "') away from position 0 is not currently supported. "
+                  "The first dimension must remain first in dimension_order.");
+            }
+        }
         dimension_order_ = order;
     }
 

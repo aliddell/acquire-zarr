@@ -43,6 +43,13 @@ ArrayDimensions::ArrayDimensions(
                " elements to match dimension count, got ",
                target_dim_order.size());
 
+        // Validate that dimension 0 is not transposed away
+        EXPECT(target_dim_order[0] == transpose_state_->acquisition_dims[0].name,
+               "Transposing dimension 0 ('",
+               transpose_state_->acquisition_dims[0].name,
+               "') away from position 0 is not currently supported. "
+               "The first dimension must remain first in dimension_order.");
+
         // Build index mapping (simple linear search for small n)
         transpose_state_->acq_to_canonical.resize(n);
         transpose_state_->canonical_to_acq.resize(n);
