@@ -30,8 +30,8 @@ ArrayDimensions::ArrayDimensions(
     if (target_dim_order.empty()) {
         dims_ = std::move(dims);
     } else {
-        // User requested transposition - allocate state
-        transpose_state_ = std::make_unique<TranspositionState>();
+        // User requested transposition - initialize state
+        transpose_state_.emplace();
         transpose_state_->acquisition_dims = std::move(dims);
 
         // Validate target order
@@ -99,11 +99,10 @@ ArrayDimensions::ArrayDimensions(
             }
         }
 
-        // If it's identity, free the transposition state
+        // If it's identity, clear the transposition state
         if (is_identity) {
             transpose_state_.reset();
         }
-        // frame_id_map will be lazily computed on first use (if needed)
     }
 
     // Now compute chunk/shard info using dimensions in storage order
@@ -408,7 +407,7 @@ ArrayDimensions::storage_dimension(size_t idx) const
 bool
 ArrayDimensions::needs_transposition() const
 {
-    return transpose_state_ != nullptr;
+    return transpose_state_.has_value();
 }
 
 bool

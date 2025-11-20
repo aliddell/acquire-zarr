@@ -3,7 +3,6 @@
 #include "zarr.types.h"
 
 #include <functional>
-#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -201,7 +200,6 @@ class ArrayDimensions
     uint64_t transpose_frame_id(uint64_t frame_id) const;
 
   private:
-    // Transposition state - only allocated when dimension reordering is needed
     struct TranspositionState
     {
         std::vector<ZarrDimension>
@@ -211,8 +209,7 @@ class ArrayDimensions
     };
 
     std::vector<ZarrDimension> dims_; // Dimensions in storage order
-    std::unique_ptr<TranspositionState>
-      transpose_state_; // nullptr when no transposition
+    std::optional<TranspositionState> transpose_state_;
 
     ZarrDataType dtype_;
 
