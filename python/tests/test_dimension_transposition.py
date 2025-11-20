@@ -12,43 +12,43 @@ from acquire_zarr import (
     ZarrStream,
 )
 
-DIMS = [
-    Dimension(
+DIMS = {
+    "t": Dimension(
         name="t",
         kind=DimensionType.TIME,
         array_size_px=1,
         chunk_size_px=1,
         shard_size_chunks=1,
     ),
-    Dimension(
+    "c": Dimension(
         name="c",
         kind=DimensionType.CHANNEL,
         array_size_px=2,
         chunk_size_px=1,
         shard_size_chunks=1,
     ),
-    Dimension(
+    "z": Dimension(
         name="z",
         kind=DimensionType.SPACE,
         array_size_px=3,
         chunk_size_px=1,
         shard_size_chunks=1,
     ),
-    Dimension(
+    "y": Dimension(
         name="y",
         kind=DimensionType.SPACE,
         array_size_px=4,
         chunk_size_px=4,
         shard_size_chunks=1,
     ),
-    Dimension(
+    "x": Dimension(
         name="x",
         kind=DimensionType.SPACE,
         array_size_px=4,
         chunk_size_px=4,
         shard_size_chunks=1,
     ),
-]
+}
 
 
 @pytest.mark.parametrize(
@@ -70,9 +70,8 @@ def test_dimension_transposition(
     transposed to T, C, Z, Y, X for storage and metadata when dimension_order
     is explicitly specified.
     """
-    dims = [next(dim for dim in DIMS if dim.name == name) for name in input_dims]
     array = ArraySettings(
-        dimensions=dims,
+        dimensions=[DIMS[name] for name in input_dims],
         dimension_order=output_dims,
     )
 
@@ -98,7 +97,7 @@ def test_dimension_transposition(
 
     # Verify data is stored in prescribed order
     data = np.asarray(zarr.open_array(store_path / "0"))
-    sizes = {dim.name: dim.array_size_px or 1 for dim in dims}
+    sizes = {dim.name: dim.array_size_px or 1 for dim in array.dimensions}
     if output_dims:
         expected_shape = tuple(sizes[name] for name in output_dims)
     else:
@@ -113,6 +112,8 @@ def test_dimension_transposition(
 
 def test_transpose_dimension_0_raises_error():
     """Test that transposing dimension 0 away raises an error."""
-    dims = [next(dim for dim in DIMS if dim.name == name) for name in ["z", "c", "y", "x"]]
-    with pytest.raises(TypeError, match="Transposing dimension 0.*not currently supported"):
+    dims = [DIMS[name] for name in ["z", "c", "y", "x"]]
+    with pytest.raises(
+        TypeError, match="Transposing dimension 0.*not currently supported"
+    ):
         ArraySettings(dimensions=dims, dimension_order=["c", "z", "y", "x"])
