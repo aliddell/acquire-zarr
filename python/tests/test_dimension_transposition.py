@@ -16,98 +16,112 @@ DIMS = {
     "t": Dimension(
         name="t",
         kind=DimensionType.TIME,
-        array_size_px=1,
+        array_size_px=2,
         chunk_size_px=1,
         shard_size_chunks=1,
     ),
     "c": Dimension(
         name="c",
         kind=DimensionType.CHANNEL,
-        array_size_px=2,
+        array_size_px=3,
         chunk_size_px=1,
         shard_size_chunks=1,
     ),
     "z": Dimension(
         name="z",
         kind=DimensionType.SPACE,
-        array_size_px=3,
+        array_size_px=4,
         chunk_size_px=1,
         shard_size_chunks=1,
     ),
     "y": Dimension(
         name="y",
         kind=DimensionType.SPACE,
-        array_size_px=4,
-        chunk_size_px=4,
+        array_size_px=16,
+        chunk_size_px=8,
         shard_size_chunks=1,
     ),
     "x": Dimension(
         name="x",
         kind=DimensionType.SPACE,
-        array_size_px=4,
-        chunk_size_px=4,
+        array_size_px=24,
+        chunk_size_px=8,
         shard_size_chunks=1,
     ),
 }
 
 
 @pytest.mark.parametrize(
-    "input_dims,output_dims,expected_frame_values",
+    "input_dims,output_dims",
     [
-        (["t", "c", "z", "y", "x"], None, [0, 1, 2, 3, 4, 5]),
-        (["t", "c", "z", "y", "x"], ["t", "c", "z", "y", "x"], [0, 1, 2, 3, 4, 5]),
-        (["t", "z", "c", "y", "x"], ["t", "c", "z", "y", "x"], [0, 2, 4, 1, 3, 5]),
+        (["t", "c", "z", "y", "x"], None),
+        (["t", "c", "z", "y", "x"], ["t", "c", "z", "y", "x"]),
+        (["t", "z", "c", "y", "x"], ["t", "c", "z", "y", "x"]),
     ],
 )
 def test_dimension_transposition(
-    store_path: Path,
-    input_dims: list[str],
-    output_dims: list[str] | None,
-    expected_frame_values: list[int],
+    store_path: Path, input_dims: list[str], output_dims: list[str] | None
 ):
     """
-    Test that dimensions provided in T, Z, C, Y, X order are correctly
-    transposed to T, C, Z, Y, X for storage and metadata when dimension_order
-    is explicitly specified.
+    Test that data received in `input_dims` order is correctly stored
+    according to the specified `output_dims` order.
+
+    Frames are written sequentially (frame 0, 1, 2, ...) where each frame
+    corresponds to iterating through the append dimensions in input_dims order.
+    The test verifies that these frames end up in the correct positions when
+    stored according to output_dims order.
     """
     array = ArraySettings(
         dimensions=[DIMS[name] for name in input_dims],
         dimension_order=output_dims,
     )
-
     settings = StreamSettings(store_path=str(store_path), arrays=[array])
     stream = ZarrStream(settings)
 
-    shape = tuple(dim.array_size_px for dim in array.dimensions)
-    n_frames = np.prod(shape[:-2])
-    for i in range(n_frames):
-        stream.append(np.full(shape[-2:], i, dtype=np.uint8))
+    output_dims = input_dims if output_dims is None else output_dims
+    input_shape = tuple(DIMS[n].array_size_px for n in input_dims)
+    output_shape = tuple(DIMS[n].array_size_px for n in output_dims)
+    n_frames = np.prod(input_shape[:-2])
+    if output_dims and output_dims != input_dims:
+        assert input_shape != output_shape, (
+            "Input and output shapes should differ for this test case"
+        )
+
+    # Write frames with sequential values (0, 1, 2, ...)
+    # Frames are written in input dimension order
+    expected_frame_values = np.arange(n_frames, dtype=np.uint8)
+    for val in expected_frame_values:
+        stream.append(np.full(input_shape[-2:], val, dtype=np.uint8))
     stream.close()
 
     # Verify metadata has axes in prescribed order
     group_metadata = json.loads(Path(store_path / "zarr.json").read_text())
     axes = group_metadata["attributes"]["ome"]["multiscales"][0]["axes"]
-
-    # Check that axes are in expected order
     axis_names = [ax["name"] for ax in axes]
-    expected_axis_names = output_dims or input_dims
-    assert axis_names == expected_axis_names, (
-        f"Expected axes in {expected_axis_names} order, got {axis_names}"
+    assert axis_names == output_dims, (
+        f"Expected metadata axes in {output_dims} order, got {axis_names}"
     )
 
     # Verify data is stored in prescribed order
-    data = np.asarray(zarr.open_array(store_path / "0"))
-    sizes = {dim.name: dim.array_size_px or 1 for dim in array.dimensions}
-    if output_dims:
-        expected_shape = tuple(sizes[name] for name in output_dims)
-    else:
-        expected_shape = tuple(sizes[name] for name in input_dims)
-    assert data.shape == expected_shape, (
-        f"Expected shape {expected_shape}, got {data.shape}"
+    written_data = np.asarray(zarr.open_array(store_path / "0"))
+    assert written_data.shape == output_shape, (
+        f"Expected written data with shape {output_shape}, got {written_data.shape}"
     )
 
-    # Verify transposed frame order
-    np.testing.assert_equal(data[..., 0, 0].ravel(), expected_frame_values)
+    # Each frame was written with np.full(), so all pixels have the same value.
+    # Extract one value per plane to get the frame numbers as stored.
+    stored_frame_values = written_data[..., 0, 0]
+
+    # Build expected frame values: start in input order, transpose if needed
+    # we need to reshape because expected_frame_values is 1D initially but
+    # stored_frame_values is in the full output shape
+    expected_frame_values = expected_frame_values.reshape(input_shape[:-2])
+    if output_dims and output_dims != input_dims:
+        perm = [input_dims.index(d) for d in output_dims[:-2]]
+        expected_frame_values = np.transpose(expected_frame_values, perm)
+
+    # Verify the stored frame values match the expected transposition
+    np.testing.assert_array_equal(stored_frame_values, expected_frame_values)
 
 
 def test_transpose_dimension_0_raises_error():
