@@ -13,7 +13,6 @@ ArrayDimensions::ArrayDimensions(
   , number_of_shards_(1)
   , bytes_per_chunk_(zarr::bytes_of_type(dtype))
   , number_of_chunks_in_memory_(1)
-  , transpose_state_(nullptr) // Start with no transposition
 {
     EXPECT(dims.size() > 2, "Array must have at least three dimensions.");
 
@@ -27,10 +26,9 @@ ArrayDimensions::ArrayDimensions(
            "Last dimension must be spatial (X axis), got type ",
            static_cast<int>(dims[n - 1].type));
 
-    // If no target order specified, use acquisition order (TRUE zero overhead)
+    // If no target order specified, use acquisition order
     if (target_dim_order.empty()) {
         dims_ = std::move(dims);
-        // transpose_state_ remains nullptr - no memory overhead
     } else {
         // User requested transposition - allocate state
         transpose_state_ = std::make_unique<TranspositionState>();
@@ -53,7 +51,7 @@ ArrayDimensions::ArrayDimensions(
                "') away from position 0 is not currently supported. "
                "The first dimension must remain first in storage_dimension_order.");
 
-        // Build index mapping (simple linear search for small n)
+        // Build index mapping
         transpose_state_->acq_to_storage.resize(n);
         transpose_state_->storage_to_acq.resize(n);
 
@@ -83,10 +81,9 @@ ArrayDimensions::ArrayDimensions(
 
         // Validate the reordered dimensions have spatial dims at the end
         EXPECT(dims_[n - 2].type == ZarrDimensionType_Space,
-               "After reordering, second-to-last dimension must be spatial (Y "
-               "axis)");
+               "After reordering, second-to-last dimension must be spatial");
         EXPECT(dims_[n - 1].type == ZarrDimensionType_Space,
-               "After reordering, last dimension must be spatial (X axis)");
+               "After reordering, last dimension must be spatial");
 
         // Note: Validation that the last two acquisition dimensions remain in
         // the last two positions is performed earlier in the Python binding
