@@ -60,16 +60,15 @@ class ArrayDimensions
     const ZarrDimension& width_dim() const;
 
     /**
-     * @brief Get the dimension at the given index in canonical OME-NGFF order
-     * (TCZYX).
-     * @param idx The index in canonical order.
+     * @brief Get the dimension at the given index in storage dimension order.
+     * @param idx The index in storage order.
      * @return The dimension at the given index.
      */
-    const ZarrDimension& canonical_dimension(size_t idx) const;
+    const ZarrDimension& storage_dimension(size_t idx) const;
 
     /**
-     * @brief Check if dimensions need transposition for OME-NGFF compliance.
-     * @return True if dimensions are not in canonical TCZYX order.
+     * @brief Check if dimensions need transposition
+     * @return True if dimensions are not in storage dimension order.
      */
     bool needs_transposition() const;
 
@@ -81,13 +80,15 @@ class ArrayDimensions
     bool needs_spatial_transposition() const;
 
     /**
-     * @brief Get the number of rows in frames as they arrive (acquisition order).
+     * @brief Get the number of rows in frames as they arrive (acquisition
+     * order).
      * @return The height of incoming frames (may differ from storage order).
      */
     uint32_t acquisition_frame_rows() const;
 
     /**
-     * @brief Get the number of columns in frames as they arrive (acquisition order).
+     * @brief Get the number of columns in frames as they arrive (acquisition
+     * order).
      * @return The width of incoming frames (may differ from storage order).
      */
     uint32_t acquisition_frame_cols() const;
@@ -151,7 +152,8 @@ class ArrayDimensions
     uint32_t chunk_layers_per_shard() const;
 
     /**
-     * @brief Get the shard index for a given chunk index, given array dimensions.
+     * @brief Get the shard index for a given chunk index, given array
+     * dimensions.
      * @param chunk_index The index of the chunk.
      * @return The index of the shard containing the chunk.
      */
@@ -200,14 +202,17 @@ class ArrayDimensions
 
   private:
     // Transposition state - only allocated when dimension reordering is needed
-    struct TranspositionState {
-        std::vector<ZarrDimension> acquisition_dims;  // Original acquisition order
-        std::vector<size_t> acq_to_canonical;         // Maps acq index -> canonical index
-        std::vector<size_t> canonical_to_acq;         // Maps canonical index -> acq index
+    struct TranspositionState
+    {
+        std::vector<ZarrDimension>
+          acquisition_dims;                 // Original acquisition order
+        std::vector<size_t> acq_to_storage; // Maps acq index -> storage index
+        std::vector<size_t> storage_to_acq; // Maps storage index -> acq index
     };
 
     std::vector<ZarrDimension> dims_; // Dimensions in storage order
-    std::unique_ptr<TranspositionState> transpose_state_;  // nullptr when no transposition
+    std::unique_ptr<TranspositionState>
+      transpose_state_; // nullptr when no transposition
 
     ZarrDataType dtype_;
 

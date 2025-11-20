@@ -516,7 +516,7 @@ zarr::Array::write_frame_to_chunks_(LockedBuffer& data)
     // dropped frames
     const auto acquisition_frame_id = frames_written_;
 
-    // Transpose frame_id from acquisition order to canonical OME-NGFF order
+    // Transpose frame_id from acquisition order to prescribed storage_dimension_order
     const auto frame_id = dimensions->transpose_frame_id(acquisition_frame_id);
 
     // offset among the chunks in the lattice

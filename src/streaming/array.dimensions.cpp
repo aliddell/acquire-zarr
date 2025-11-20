@@ -54,8 +54,8 @@ ArrayDimensions::ArrayDimensions(
                "The first dimension must remain first in storage_dimension_order.");
 
         // Build index mapping (simple linear search for small n)
-        transpose_state_->acq_to_canonical.resize(n);
-        transpose_state_->canonical_to_acq.resize(n);
+        transpose_state_->acq_to_storage.resize(n);
+        transpose_state_->storage_to_acq.resize(n);
 
         dims_.resize(n);
         for (size_t target_idx = 0; target_idx < n; ++target_idx) {
@@ -68,8 +68,8 @@ ArrayDimensions::ArrayDimensions(
                     target_name) {
                     dims_[target_idx] =
                       transpose_state_->acquisition_dims[acq_idx];
-                    transpose_state_->acq_to_canonical[acq_idx] = target_idx;
-                    transpose_state_->canonical_to_acq[target_idx] = acq_idx;
+                    transpose_state_->acq_to_storage[acq_idx] = target_idx;
+                    transpose_state_->storage_to_acq[target_idx] = acq_idx;
                     found = true;
                     break;
                 }
@@ -96,7 +96,7 @@ ArrayDimensions::ArrayDimensions(
         // Check if transposition is actually needed (might be identity)
         bool is_identity = true;
         for (size_t i = 0; i < n; ++i) {
-            if (transpose_state_->acq_to_canonical[i] != i) {
+            if (transpose_state_->acq_to_storage[i] != i) {
                 is_identity = false;
                 break;
             }
@@ -403,7 +403,7 @@ ArrayDimensions::shard_internal_index_(uint32_t chunk_index) const
 }
 
 const ZarrDimension&
-ArrayDimensions::canonical_dimension(size_t idx) const
+ArrayDimensions::storage_dimension(size_t idx) const
 {
     return dims_[idx];
 }
@@ -423,10 +423,10 @@ ArrayDimensions::needs_spatial_transposition() const
 
     const auto n = ndims();
     // Check if the last two spatial dimensions (height and width) are swapped.
-    // If acq[n-2] maps to canonical[n-1] and acq[n-1] maps to canonical[n-2],
+    // If acq[n-2] maps to storage_order[n-1] and acq[n-1] maps to storage_order[n-2],
     // then height and width are swapped (Y↔X).
-    return transpose_state_->acq_to_canonical[n - 2] == n - 1 &&
-           transpose_state_->acq_to_canonical[n - 1] == n - 2;
+    return transpose_state_->acq_to_storage[n - 2] == n - 1 &&
+           transpose_state_->acq_to_storage[n - 1] == n - 2;
 }
 
 uint32_t
@@ -474,33 +474,33 @@ ArrayDimensions::transpose_frame_id(uint64_t frame_id) const
     // dimensions). This avoids heap allocations on every frame write.
     constexpr size_t kMaxStackDims = 8;
     uint64_t acq_coords_stack[kMaxStackDims];
-    uint64_t can_coords_stack[kMaxStackDims];
+    uint64_t stor_coords_stack[kMaxStackDims];
     uint64_t acq_strides_stack[kMaxStackDims];
-    uint64_t can_strides_stack[kMaxStackDims];
+    uint64_t stor_strides_stack[kMaxStackDims];
 
     uint64_t* acq_coords = acq_coords_stack;
-    uint64_t* can_coords = can_coords_stack;
+    uint64_t* stor_coords = stor_coords_stack;
     uint64_t* acq_strides = acq_strides_stack;
-    uint64_t* can_strides = can_strides_stack;
+    uint64_t* stor_strides = stor_strides_stack;
 
     // Fallback to heap allocation for unusual cases with many dimensions
-    std::vector<uint64_t> acq_coords_heap, can_coords_heap;
-    std::vector<uint64_t> acq_strides_heap, can_strides_heap;
+    std::vector<uint64_t> acq_coords_heap, stor_coords_heap;
+    std::vector<uint64_t> acq_strides_heap, stor_strides_heap;
 
     if (n > kMaxStackDims) {
         acq_coords_heap.resize(n);
-        can_coords_heap.resize(n);
+        stor_coords_heap.resize(n);
         acq_strides_heap.resize(n, 1);
-        can_strides_heap.resize(n, 1);
+        stor_strides_heap.resize(n, 1);
         acq_coords = acq_coords_heap.data();
-        can_coords = can_coords_heap.data();
+        stor_coords = stor_coords_heap.data();
         acq_strides = acq_strides_heap.data();
-        can_strides = can_strides_heap.data();
+        stor_strides = stor_strides_heap.data();
     } else {
         // Initialize stack arrays
         for (size_t i = 0; i < n; ++i) {
             acq_strides[i] = 1;
-            can_strides[i] = 1;
+            stor_strides[i] = 1;
         }
     }
 
@@ -528,24 +528,24 @@ ArrayDimensions::transpose_frame_id(uint64_t frame_id) const
     acq_coords[n - 2] = 0;
     acq_coords[n - 1] = 0;
 
-    // Step 3: Permute coordinates from acquisition order to canonical order
+    // Step 3: Permute coordinates from acquisition order to storage order
     for (size_t i = 0; i < n; ++i) {
-        can_coords[transpose_state_->acq_to_canonical[i]] = acq_coords[i];
+        stor_coords[transpose_state_->acq_to_storage[i]] = acq_coords[i];
     }
 
-    // Step 4: Calculate strides in canonical order
+    // Step 4: Calculate strides in storage dimension order
     if (n > 2) {
-        can_strides[n - 3] = 1;
+        stor_strides[n - 3] = 1;
         for (int i = static_cast<int>(n) - 4; i >= 0; --i) {
-            can_strides[i] = can_strides[i + 1] * dims_[i + 1].array_size_px;
+            stor_strides[i] = stor_strides[i + 1] * dims_[i + 1].array_size_px;
         }
     }
 
-    // Step 5: Convert canonical coordinates back to linear frame_id
-    uint64_t canonical_frame_id = 0;
+    // Step 5: Convert storage dimension coordinates back to linear frame_id
+    uint64_t storage_frame_id = 0;
     for (size_t i = 0; i < n - 2; ++i) {
-        canonical_frame_id += can_coords[i] * can_strides[i];
+        storage_frame_id += stor_coords[i] * stor_strides[i];
     }
 
-    return canonical_frame_id;
+    return storage_frame_id;
 }
