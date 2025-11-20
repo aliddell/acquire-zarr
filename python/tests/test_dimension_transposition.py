@@ -157,11 +157,10 @@ def test_swap_xy(store_path: Path):
 
     array = ArraySettings(dimensions=dims, dimension_order=["t", "x", "y"])
     settings = StreamSettings(store_path=str(store_path), arrays=[array])
+    stream = ZarrStream(settings)
 
     frame = np.arange(y_size, dtype=np.uint8)[:, np.newaxis]
     frame = np.broadcast_to(frame, (y_size, x_size))
-
-    stream = ZarrStream(settings)
     stream.append(frame)
     stream.close()
 
