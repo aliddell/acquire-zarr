@@ -51,7 +51,7 @@ ArrayDimensions::ArrayDimensions(
                "Transposing dimension 0 ('",
                transpose_state_->acquisition_dims[0].name,
                "') away from position 0 is not currently supported. "
-               "The first dimension must remain first in dimension_order.");
+               "The first dimension must remain first in storage_dimension_order.");
 
         // Build index mapping (simple linear search for small n)
         transpose_state_->acq_to_canonical.resize(n);
@@ -453,7 +453,7 @@ ArrayDimensions::acquisition_frame_cols() const
     return transpose_state_->acquisition_dims[n - 1].array_size_px;
 }
 
-// Transpose a frame ID from acquisition order to output dimension_order
+// Transpose a frame ID from acquisition order to output storage_dimension_order
 uint64_t
 ArrayDimensions::transpose_frame_id(uint64_t frame_id) const
 {

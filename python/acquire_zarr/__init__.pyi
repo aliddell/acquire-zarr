@@ -71,7 +71,7 @@ class ArraySettings:
     data_type: Union[DataType, numpy.dtype]
     compression: Optional[CompressionSettings]
     downsampling_method: Optional[DownsamplingMethod]
-    dimension_order: List[str]
+    storage_dimension_order: List[str]
 
     def __init__(self, **kwargs) -> None: ...
     def __repr__(self) -> str: ...

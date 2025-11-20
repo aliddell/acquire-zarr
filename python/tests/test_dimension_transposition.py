@@ -73,7 +73,7 @@ def test_dimension_transposition(
     """
     array = ArraySettings(
         dimensions=[DIMS[name] for name in input_dims],
-        dimension_order=output_dims,
+        storage_dimension_order=output_dims,
     )
     settings = StreamSettings(store_path=str(store_path), arrays=[array])
     stream = ZarrStream(settings)
@@ -145,7 +145,7 @@ def test_transpose_raises_error(
     """Test that transposing dimension 0 away raises an error."""
     with pytest.raises(TypeError, match=error_msg):
         ArraySettings(
-            dimensions=[DIMS[name] for name in dims_in], dimension_order=dims_out
+            dimensions=[DIMS[name] for name in dims_in], storage_dimension_order=dims_out
         )
 
 
@@ -155,7 +155,7 @@ def test_swap_xy(store_path: Path):
     y_size = DIMS["y"].array_size_px
     x_size = DIMS["x"].array_size_px
 
-    array = ArraySettings(dimensions=dims, dimension_order=["t", "x", "y"])
+    array = ArraySettings(dimensions=dims, storage_dimension_order=["t", "x", "y"])
     settings = StreamSettings(store_path=str(store_path), arrays=[array])
     stream = ZarrStream(settings)
 
