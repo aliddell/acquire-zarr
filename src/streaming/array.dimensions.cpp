@@ -9,102 +9,89 @@ ArrayDimensions::ArrayDimensions(
   ZarrDataType dtype,
   const std::vector<std::string>& target_dim_order)
   : dtype_(dtype)
-  , needs_transposition_(false)
   , chunks_per_shard_(1)
   , number_of_shards_(1)
   , bytes_per_chunk_(zarr::bytes_of_type(dtype))
   , number_of_chunks_in_memory_(1)
+  , transpose_state_(nullptr)  // Start with no transposition
 {
     EXPECT(dims.size() > 2, "Array must have at least three dimensions.");
 
     const auto n = dims.size();
 
-    // Store original acquisition order dimensions
-    acquisition_dims_ = std::move(dims);
+    // Validate that last 2 dimensions are spatial (Y, X)
+    EXPECT(dims[n - 2].type == ZarrDimensionType_Space,
+           "Second-to-last dimension must be spatial (Y axis), got type ",
+           static_cast<int>(dims[n - 2].type));
+    EXPECT(dims[n - 1].type == ZarrDimensionType_Space,
+           "Last dimension must be spatial (X axis), got type ",
+           static_cast<int>(dims[n - 1].type));
 
-    // Initialize permutation maps to identity
-    acquisition_to_canonical_.resize(n);
-    canonical_to_acquisition_.resize(n);
-    for (size_t i = 0; i < n; ++i) {
-        acquisition_to_canonical_[i] = i;
-        canonical_to_acquisition_[i] = i;
-    }
-
-    // If no target order specified, use acquisition order (no transposition)
+    // If no target order specified, use acquisition order (TRUE zero overhead)
     if (target_dim_order.empty()) {
-        // Keep original order - zero overhead path
-        dims_ = acquisition_dims_;
-        needs_transposition_ = false;
+        dims_ = std::move(dims);
+        // transpose_state_ remains nullptr - no memory overhead
     } else {
-        // User requested specific dimension order - validate and reorder
+        // User requested transposition - allocate state
+        transpose_state_ = std::make_unique<TranspositionState>();
+        transpose_state_->acquisition_dims = std::move(dims);
+
+        // Validate target order
         EXPECT(target_dim_order.size() == n,
                "Target dimension order must have ",
                n,
                " elements to match dimension count, got ",
                target_dim_order.size());
 
-        // Build a map from dimension name to acquisition index
-        std::unordered_map<std::string, size_t> name_to_acq_idx;
-        for (size_t i = 0; i < n; ++i) {
-            name_to_acq_idx[acquisition_dims_[i].name] = i;
-        }
+        // Build index mapping (simple linear search for small n)
+        transpose_state_->acq_to_canonical.resize(n);
+        transpose_state_->canonical_to_acq.resize(n);
 
-        // Build canonical ordering based on target_dim_order
         dims_.resize(n);
         for (size_t target_idx = 0; target_idx < n; ++target_idx) {
             const auto& target_name = target_dim_order[target_idx];
-            auto it = name_to_acq_idx.find(target_name);
-            EXPECT(it != name_to_acq_idx.end(),
+
+            // Find this name in acquisition dims
+            bool found = false;
+            for (size_t acq_idx = 0; acq_idx < n; ++acq_idx) {
+                if (transpose_state_->acquisition_dims[acq_idx].name == target_name) {
+                    dims_[target_idx] = transpose_state_->acquisition_dims[acq_idx];
+                    transpose_state_->acq_to_canonical[acq_idx] = target_idx;
+                    transpose_state_->canonical_to_acq[target_idx] = acq_idx;
+                    found = true;
+                    break;
+                }
+            }
+
+            EXPECT(found,
                    "Dimension name '",
                    target_name,
                    "' in target order not found in dimensions array");
-
-            const size_t acq_idx = it->second;
-            dims_[target_idx] = acquisition_dims_[acq_idx];
-            acquisition_to_canonical_[acq_idx] = target_idx;
-            canonical_to_acquisition_[target_idx] = acq_idx;
         }
 
-        // Check if transposition is actually needed
-        needs_transposition_ = false;
+        // Validate the reordered dimensions have spatial dims at the end
+        EXPECT(dims_[n - 2].type == ZarrDimensionType_Space,
+               "After reordering, second-to-last dimension must be spatial (Y axis)");
+        EXPECT(dims_[n - 1].type == ZarrDimensionType_Space,
+               "After reordering, last dimension must be spatial (X axis)");
+
+        // Check if transposition is actually needed (might be identity)
+        bool is_identity = true;
         for (size_t i = 0; i < n; ++i) {
-            if (acquisition_to_canonical_[i] != i) {
-                needs_transposition_ = true;
+            if (transpose_state_->acq_to_canonical[i] != i) {
+                is_identity = false;
                 break;
             }
         }
-    }
 
-    // Validate spatial dimensions (applies regardless of transposition)
-    // The current implementation assumes exactly 2 spatial dimensions (Y, X)
-    // as the last two dimensions. This is because frame_id only encodes
-    // non-spatial dimensions.
-    size_t space_count = 0;
-    for (const auto& dim : dims_) {
-        if (dim.type == ZarrDimensionType_Space) {
-            space_count++;
+        // If it's identity, free the transposition state
+        if (is_identity) {
+            transpose_state_.reset();
         }
+        // frame_id_map will be lazily computed on first use (if needed)
     }
-    EXPECT(space_count == 2,
-           "Expected exactly 2 spatial dimensions (Y, X). Got ",
-           space_count,
-           " spatial dimensions. The transpose_frame_id implementation "
-           "currently assumes spatial dimensions are the last 2.");
 
-    // Validate that spatial dimensions are the last ones (in storage order)
-    for (size_t i = 0; i < n - 2; ++i) {
-        EXPECT(dims_[i].type != ZarrDimensionType_Space,
-               "Spatial dimensions must be the last two dimensions. "
-               "Found spatial dimension '",
-               dims_[i].name,
-               "' at position ",
-               i);
-    }
-    EXPECT(dims_[n - 2].type == ZarrDimensionType_Space &&
-             dims_[n - 1].type == ZarrDimensionType_Space,
-           "Last two dimensions must be spatial (Y, X)");
-
-    // Now compute chunk/shard info using canonical dimensions
+    // Now compute chunk/shard info using dimensions in storage order
     for (auto i = 0; i < dims_.size(); ++i) {
         const auto& dim = dims_[i];
         bytes_per_chunk_ *= dim.chunk_size_px;
@@ -406,14 +393,14 @@ ArrayDimensions::canonical_dimension(size_t idx) const
 bool
 ArrayDimensions::needs_transposition() const
 {
-    return needs_transposition_;
+    return transpose_state_ != nullptr;
 }
 
 uint64_t
 ArrayDimensions::transpose_frame_id(uint64_t frame_id) const
 {
     // Fast path: no transposition needed
-    if (!needs_transposition_) {
+    if (!transpose_state_) {
         return frame_id;
     }
 
@@ -460,7 +447,7 @@ ArrayDimensions::transpose_frame_id(uint64_t frame_id) const
         acq_strides[n - 3] = 1;
         for (int i = static_cast<int>(n) - 4; i >= 0; --i) {
             acq_strides[i] =
-              acq_strides[i + 1] * acquisition_dims_[i + 1].array_size_px;
+              acq_strides[i + 1] * transpose_state_->acquisition_dims[i + 1].array_size_px;
         }
     }
 
@@ -477,7 +464,7 @@ ArrayDimensions::transpose_frame_id(uint64_t frame_id) const
 
     // Step 3: Permute coordinates from acquisition order to canonical order
     for (size_t i = 0; i < n; ++i) {
-        can_coords[acquisition_to_canonical_[i]] = acq_coords[i];
+        can_coords[transpose_state_->acq_to_canonical[i]] = acq_coords[i];
     }
 
     // Step 4: Calculate strides in canonical order

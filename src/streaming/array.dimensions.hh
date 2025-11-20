@@ -3,6 +3,7 @@
 #include "zarr.types.h"
 
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -196,11 +197,16 @@ class ArrayDimensions
     uint64_t transpose_frame_id(uint64_t frame_id) const;
 
   private:
-    std::vector<ZarrDimension> dims_; // Stored in canonical OME-NGFF order
-    std::vector<ZarrDimension> acquisition_dims_; // Original acquisition order
-    std::vector<size_t> acquisition_to_canonical_;
-    std::vector<size_t> canonical_to_acquisition_;
-    bool needs_transposition_;
+    // Transposition state - only allocated when dimension reordering is needed
+    struct TranspositionState {
+        std::vector<ZarrDimension> acquisition_dims;  // Original acquisition order
+        std::vector<size_t> acq_to_canonical;         // Maps acq index -> canonical index
+        std::vector<size_t> canonical_to_acq;         // Maps canonical index -> acq index
+        // Future: pre-computed frame_id lookup table
+    };
+
+    std::vector<ZarrDimension> dims_; // Dimensions in storage order
+    std::unique_ptr<TranspositionState> transpose_state_;  // nullptr when no transposition
 
     ZarrDataType dtype_;
 
