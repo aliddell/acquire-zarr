@@ -60,10 +60,21 @@ class ArraySettings:
 
     Attributes:
       output_key: Key within the Zarr dataset where this array will be stored.
-      dimensions: List of dimension properties defining the dataset structure. Should be ordered from slowest to fastest changing (e.g., [Z, Y, X] for 3D data).
+      dimensions: List of dimension properties defining the dataset structure.
+        Should be ordered from slowest to fastest changing (e.g., [Z, Y, X] for 3D data).
       data_type: The pixel data type for the dataset.
       compression: Optional compression settings for chunks. If None, no compression is applied.
       downsampling_method: Method used for generating optional multiscale levels (image pyramid).
+      storage_dimension_order: Order of dimensions for storage, which may different
+        from the acquisition order defined in `dimensions`. Must be a list of dimension
+        names corresponding to those in `dimensions`.
+        This allows reordering according to the desired final layout (e.g.,
+        `[TIME, CHANNEL, Z, Y, X]`, which is currently mandated by the OME-Zarr
+        specification).
+        Notes:
+            - The first dimension *may not* be moved to a non-leading position.
+            - The last two dimensions *may not* be moved out of the final two positions,
+              but MAY be swapped with each other.
     """
 
     output_key: str
