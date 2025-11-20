@@ -504,9 +504,10 @@ ArrayDimensions::transpose_frame_id(uint64_t frame_id) const
         }
     }
 
-    // Step 1: Calculate strides in acquisition order (only for non-spatial
-    // dims) frame_id encodes non-spatial dimensions only. The last two dims are
-    // spatial (Y, X).
+    // Step 1: Calculate strides in acquisition order for every frame-addressable
+    // axis (all dimensions except the trailing plane axes). frame_id enumerates
+    // only dims[0..n-3]; the final two spatial dimensions (typically Y, X) stay
+    // at zero in this coordinate space.
     if (n > 2) {
         acq_strides[n - 3] = 1;
         for (int i = static_cast<int>(n) - 4; i >= 0; --i) {

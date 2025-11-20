@@ -182,36 +182,19 @@ class ArrayDimensions
     uint32_t shard_internal_index(uint32_t chunk_index) const;
 
     /**
-     * @brief Transpose a frame ID from acquisition order to canonical OME-NGFF
-     * order.
+     * @brief Remap a frame ID from acquisition order into the storage
+     *        dimension order.
      *
-     * Frame IDs are linear indices that encode only non-spatial dimensions
-     * (e.g., Time, Channel, Z-depth). The spatial dimensions (Y, X) are always
-     * implicit zeros in the frame_id coordinate space, as frame_id represents
-     * which 2D image plane is being written, not individual pixels.
-     *
-     * When dimensions are provided in acquisition order (e.g., T, Z, C, Y, X),
-     * frames are written sequentially with frame_id incrementing according to
-     * that order. This function converts the acquisition frame_id to a
-     * canonical frame_id that corresponds to OME-NGFF dimension order
-     * (T, C, Z, Y, X).
-     *
-     * Example:
-     *   Acquisition order: T(size=2), Z(size=3), C(size=2), Y, X
-     *   Frame 0: T=0, Z=0, C=0 -> acquisition frame_id=0
-     *   Frame 1: T=0, Z=0, C=1 -> acquisition frame_id=1
-     *   Frame 2: T=0, Z=1, C=0 -> acquisition frame_id=2
-     *
-     *   Canonical order: T(size=2), C(size=2), Z(size=3), Y, X
-     *   The same physical frames map to:
-     *   Frame T=0,C=0,Z=0 -> canonical frame_id=0
-     *   Frame T=0,C=1,Z=0 -> canonical frame_id=3
-     *   Frame T=0,C=0,Z=1 -> canonical frame_id=1
-     *
-     *   So transpose_frame_id(1) = 3, transpose_frame_id(2) = 1, etc.
+     * Frame IDs encode the linear position across every axis except the final
+     * two spatial tile axes (typically Y and X), which are implicitly zero
+     * because a frame represents a whole 2D plane. When acquisition order
+     * differs from the configured storage order, this permutes those encoded
+     * coordinates so the returned ID walks frames in storage order (e.g.,
+     * TCZYX for NGFF). If reordering is unnecessary, the original frame_id is
+     * returned unchanged.
      *
      * @param frame_id Sequential frame counter in acquisition order.
-     * @return Sequential frame counter in canonical TCZYX order.
+     * @return Sequential frame counter in the storage dimension order.
      */
     uint64_t transpose_frame_id(uint64_t frame_id) const;
 
