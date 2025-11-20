@@ -88,6 +88,11 @@ ArrayDimensions::ArrayDimensions(
         EXPECT(dims_[n - 1].type == ZarrDimensionType_Space,
                "After reordering, last dimension must be spatial (X axis)");
 
+        // Note: Validation that the last two acquisition dimensions remain in
+        // the last two positions is performed earlier in the Python binding
+        // (acquire-zarr-py.cpp) to provide better error messages at ArraySettings
+        // creation time.
+
         // Check if transposition is actually needed (might be identity)
         bool is_identity = true;
         for (size_t i = 0; i < n; ++i) {
@@ -407,6 +412,45 @@ bool
 ArrayDimensions::needs_transposition() const
 {
     return transpose_state_ != nullptr;
+}
+
+bool
+ArrayDimensions::needs_spatial_transposition() const
+{
+    if (!transpose_state_) {
+        return false;
+    }
+
+    const auto n = ndims();
+    // Check if the last two spatial dimensions (height and width) are swapped.
+    // If acq[n-2] maps to canonical[n-1] and acq[n-1] maps to canonical[n-2],
+    // then height and width are swapped (Y↔X).
+    return transpose_state_->acq_to_canonical[n - 2] == n - 1 &&
+           transpose_state_->acq_to_canonical[n - 1] == n - 2;
+}
+
+uint32_t
+ArrayDimensions::acquisition_frame_rows() const
+{
+    const auto n = ndims();
+    if (!transpose_state_) {
+        // No transposition, acquisition order = storage order
+        return dims_[n - 2].array_size_px;
+    }
+    // Return height from acquisition dimensions
+    return transpose_state_->acquisition_dims[n - 2].array_size_px;
+}
+
+uint32_t
+ArrayDimensions::acquisition_frame_cols() const
+{
+    const auto n = ndims();
+    if (!transpose_state_) {
+        // No transposition, acquisition order = storage order
+        return dims_[n - 1].array_size_px;
+    }
+    // Return width from acquisition dimensions
+    return transpose_state_->acquisition_dims[n - 1].array_size_px;
 }
 
 // Transpose a frame ID from acquisition order to output dimension_order

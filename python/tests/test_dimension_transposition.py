@@ -124,14 +124,49 @@ def test_dimension_transposition(
     np.testing.assert_array_equal(stored_frame_values, expected_frame_values)
 
 
-def test_transpose_dimension_0_raises_error():
+@pytest.mark.parametrize(
+    "dims_in,dims_out,error_msg",
+    [
+        (
+            ["z", "c", "y", "x"],
+            ["c", "z", "y", "x"],
+            "Transposing dimension 0.*not currently supported",
+        ),
+        (
+            ["t", "z", "y", "x"],
+            ["t", "y", "z", "x"],
+            "The last two dimensions in acquisition order",
+        ),
+    ],
+)
+def test_transpose_raises_error(
+    dims_in: list[str], dims_out: list[str], error_msg: str
+):
     """Test that transposing dimension 0 away raises an error."""
-    input_dims = ["z", "c", "y", "x"]
-    output_dims = ["c", "z", "y", "x"]
-    with pytest.raises(
-        TypeError, match="Transposing dimension 0.*not currently supported"
-    ):
+    with pytest.raises(TypeError, match=error_msg):
         ArraySettings(
-            dimensions=[DIMS[name] for name in input_dims],
-            dimension_order=output_dims,
+            dimensions=[DIMS[name] for name in dims_in], dimension_order=dims_out
         )
+
+
+def test_swap_xy(store_path: Path):
+    """Test that swapping last two dimensions works correctly."""
+    dims = [DIMS[name] for name in ["t", "y", "x"]]
+    y_size = DIMS["y"].array_size_px
+    x_size = DIMS["x"].array_size_px
+
+    array = ArraySettings(dimensions=dims, dimension_order=["t", "x", "y"])
+    settings = StreamSettings(store_path=str(store_path), arrays=[array])
+
+    frame = np.arange(y_size, dtype=np.uint8)[:, np.newaxis]
+    frame = np.broadcast_to(frame, (y_size, x_size))
+
+    stream = ZarrStream(settings)
+    stream.append(frame)
+    stream.close()
+
+    data = np.asarray(zarr.open_array(store_path / "0"))
+    assert data.shape == (1, x_size, y_size)
+
+    expected = np.array([list(range(y_size))] * x_size, dtype=np.uint8)
+    np.testing.assert_array_equal(data[0], expected)

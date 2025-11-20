@@ -74,6 +74,25 @@ class ArrayDimensions
     bool needs_transposition() const;
 
     /**
+     * @brief Check if spatial dimensions (Y, X) need transposition.
+     * @return True if the last two dimensions are swapped between acquisition
+     *         and storage order.
+     */
+    bool needs_spatial_transposition() const;
+
+    /**
+     * @brief Get the number of rows in frames as they arrive (acquisition order).
+     * @return The height of incoming frames (may differ from storage order).
+     */
+    uint32_t acquisition_frame_rows() const;
+
+    /**
+     * @brief Get the number of columns in frames as they arrive (acquisition order).
+     * @return The width of incoming frames (may differ from storage order).
+     */
+    uint32_t acquisition_frame_cols() const;
+
+    /**
      * @brief Get the index of a chunk in the chunk lattice for a given frame
      * and dimension.
      * @param frame_id The frame ID.

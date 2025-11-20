@@ -587,6 +587,31 @@ class PyZarrArraySettings
                   "') away from position 0 is not currently supported. "
                   "The first dimension must remain first in dimension_order.");
             }
+
+            // Validate that the last two acquisition dimensions remain in the
+            // last two positions (they can swap with each other, but cannot move elsewhere).
+            // This is required because frames arrive as 2D arrays with the shape of
+            // the last two acquisition dimensions.
+            const auto n = dims_.size();
+            if (order.size() == n && n >= 2) {
+                const auto& last_acq_name = dims_[n - 1].name();
+                const auto& second_last_acq_name = dims_[n - 2].name();
+
+                const bool last_two_preserved =
+                  (order[n - 1] == last_acq_name ||
+                   order[n - 1] == second_last_acq_name) &&
+                  (order[n - 2] == last_acq_name ||
+                   order[n - 2] == second_last_acq_name);
+
+                if (!last_two_preserved) {
+                    throw py::type_error(
+                      "The last two dimensions in acquisition order ('" +
+                      second_last_acq_name + "', '" + last_acq_name +
+                      "') must remain in the last two positions in dimension_order. "
+                      "They may swap with each other, but cannot be reordered with "
+                      "other dimensions.");
+                }
+            }
         }
         dimension_order_ = order;
     }
