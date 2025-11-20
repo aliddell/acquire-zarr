@@ -126,8 +126,12 @@ def test_dimension_transposition(
 
 def test_transpose_dimension_0_raises_error():
     """Test that transposing dimension 0 away raises an error."""
-    dims = [DIMS[name] for name in ["z", "c", "y", "x"]]
+    input_dims = ["z", "c", "y", "x"]
+    output_dims = ["c", "z", "y", "x"]
     with pytest.raises(
         TypeError, match="Transposing dimension 0.*not currently supported"
     ):
-        ArraySettings(dimensions=dims, dimension_order=["c", "z", "y", "x"])
+        ArraySettings(
+            dimensions=[DIMS[name] for name in input_dims],
+            dimension_order=output_dims,
+        )
