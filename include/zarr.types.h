@@ -141,7 +141,7 @@ extern "C"
      * currently requires TCZYX order), set storage_dimension_order to an array of dimension names
      * in the desired output order. MUST match the names in the dimensions array.
      * If storage_dimension_order is NULL, dimensions will be stored in the order provided.
-     * @note storage_dimension_order_count should equal dimension_count if storage_dimension_order is non-NULL.
+     * @note storage_dimension_order_size should equal dimension_count if storage_dimension_order is non-NULL.
      */
     typedef struct
     {
@@ -153,7 +153,7 @@ extern "C"
         bool multiscale;
         ZarrDownsamplingMethod downsampling_method;
         const char** storage_dimension_order;
-        size_t storage_dimension_order_count;
+        size_t storage_dimension_order_size;
     } ZarrArraySettings;
 
     /**
