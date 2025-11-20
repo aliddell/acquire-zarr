@@ -208,6 +208,11 @@ class ArrayDimensions
         std::vector<size_t> storage_to_acq; // Maps storage index -> acq index
     };
 
+    static std::pair<std::vector<ZarrDimension>,
+                     std::optional<TranspositionMap>>
+    compute_transposition(std::vector<ZarrDimension>&& acquisition_dims,
+                          const std::vector<std::string>& target_dim_order);
+
     std::vector<ZarrDimension> dims_; // Dimensions in storage order
     std::optional<TranspositionMap> transpose_map_;
 

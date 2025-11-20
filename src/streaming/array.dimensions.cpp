@@ -2,7 +2,84 @@
 #include "macros.hh"
 #include "zarr.common.hh"
 
+#include <tuple>
 #include <unordered_map>
+
+std::pair<std::vector<ZarrDimension>,
+          std::optional<ArrayDimensions::TranspositionMap>>
+ArrayDimensions::compute_transposition(
+  std::vector<ZarrDimension>&& acquisition_dims,
+  const std::vector<std::string>& target_dim_order)
+{
+    if (target_dim_order.empty()) {
+        return { std::move(acquisition_dims), std::nullopt };
+    }
+
+    const auto n = acquisition_dims.size();
+    TranspositionMap map;
+    map.acquisition_dims = std::move(acquisition_dims);
+
+    // Validate target order
+    EXPECT(target_dim_order.size() == n,
+           "Target dimension order must have ",
+           n,
+           " elements to match dimension count, got ",
+           target_dim_order.size());
+
+    // Validate that dimension 0 is not transposed away
+    EXPECT(target_dim_order[0] == map.acquisition_dims[0].name,
+           "Transposing dimension 0 ('",
+           map.acquisition_dims[0].name,
+           "') away from position 0 is not currently supported. "
+           "The first dimension must remain first in storage_dimension_order.");
+
+    // Build index mapping
+    map.acq_to_storage.resize(n);
+    map.storage_to_acq.resize(n);
+
+    std::vector<ZarrDimension> storage_dims(n);
+    for (size_t target_idx = 0; target_idx < n; ++target_idx) {
+        const auto& target_name = target_dim_order[target_idx];
+
+        // Find this name in acquisition dims
+        bool found = false;
+        for (size_t acq_idx = 0; acq_idx < n; ++acq_idx) {
+            if (map.acquisition_dims[acq_idx].name == target_name) {
+                storage_dims[target_idx] = map.acquisition_dims[acq_idx];
+                map.acq_to_storage[acq_idx] = target_idx;
+                map.storage_to_acq[target_idx] = acq_idx;
+                found = true;
+                break;
+            }
+        }
+
+        EXPECT(found,
+               "Dimension name '",
+               target_name,
+               "' in target order not found in dimensions array");
+    }
+
+    // Validate the reordered dimensions have spatial dims at the end
+    EXPECT(storage_dims[n - 2].type == ZarrDimensionType_Space,
+           "After reordering, second-to-last dimension must be spatial");
+    EXPECT(storage_dims[n - 1].type == ZarrDimensionType_Space,
+           "After reordering, last dimension must be spatial");
+
+    // Check if transposition is actually needed (might be identity)
+    bool is_identity = true;
+    for (size_t i = 0; i < n; ++i) {
+        if (map.acq_to_storage[i] != i) {
+            is_identity = false;
+            break;
+        }
+    }
+
+    if (is_identity) {
+        return { std::move(storage_dims), std::nullopt };
+    }
+
+    return { std::move(storage_dims), std::move(map) };
+}
 
 ArrayDimensions::ArrayDimensions(
   std::vector<ZarrDimension>&& dims,
@@ -26,84 +103,8 @@ ArrayDimensions::ArrayDimensions(
            "Last dimension must be spatial (X axis), got type ",
            static_cast<int>(dims[n - 1].type));
 
-    // If no target order specified, use acquisition order
-    if (target_dim_order.empty()) {
-        dims_ = std::move(dims);
-    } else {
-        // User requested transposition - initialize map
-        transpose_map_.emplace();
-        transpose_map_->acquisition_dims = std::move(dims);
-
-        // Validate target order
-        EXPECT(target_dim_order.size() == n,
-               "Target dimension order must have ",
-               n,
-               " elements to match dimension count, got ",
-               target_dim_order.size());
-
-        // Validate that dimension 0 is not transposed away
-        // the codebase currently treats dimension 0 specially in several places
-        // and we do not yet support moving it
-        EXPECT(target_dim_order[0] ==
-                 transpose_map_->acquisition_dims[0].name,
-               "Transposing dimension 0 ('",
-               transpose_map_->acquisition_dims[0].name,
-               "') away from position 0 is not currently supported. "
-               "The first dimension must remain first in storage_dimension_order.");
-
-        // Build index mapping
-        transpose_map_->acq_to_storage.resize(n);
-        transpose_map_->storage_to_acq.resize(n);
-
-        dims_.resize(n);
-        for (size_t target_idx = 0; target_idx < n; ++target_idx) {
-            const auto& target_name = target_dim_order[target_idx];
-
-            // Find this name in acquisition dims
-            bool found = false;
-            for (size_t acq_idx = 0; acq_idx < n; ++acq_idx) {
-                if (transpose_map_->acquisition_dims[acq_idx].name ==
-                    target_name) {
-                    dims_[target_idx] =
-                      transpose_map_->acquisition_dims[acq_idx];
-                    transpose_map_->acq_to_storage[acq_idx] = target_idx;
-                    transpose_map_->storage_to_acq[target_idx] = acq_idx;
-                    found = true;
-                    break;
-                }
-            }
-
-            EXPECT(found,
-                   "Dimension name '",
-                   target_name,
-                   "' in target order not found in dimensions array");
-        }
-
-        // Validate the reordered dimensions have spatial dims at the end
-        EXPECT(dims_[n - 2].type == ZarrDimensionType_Space,
-               "After reordering, second-to-last dimension must be spatial");
-        EXPECT(dims_[n - 1].type == ZarrDimensionType_Space,
-               "After reordering, last dimension must be spatial");
-
-        // Note: Validation that the last two acquisition dimensions remain in
-        // the last two positions is performed earlier in the Python binding
-        // (acquire-zarr-py.cpp) to provide better error messages at ArraySettings
-        // creation time.
-
-        // Check if transposition is actually needed (might be identity)
-        bool is_identity = true;
-        for (size_t i = 0; i < n; ++i) {
-            if (transpose_map_->acq_to_storage[i] != i) {
-                is_identity = false;
-                break;
-            }
-        }
-
-        // If it's identity, clear the transposition map
-        if (is_identity) {
-            transpose_map_.reset();
-        }
-    }
+    std::tie(dims_, transpose_map_) =
+      compute_transposition(std::move(dims), target_dim_order);
 
     // Now compute chunk/shard info using dimensions in storage order
     for (auto i = 0; i < dims_.size(); ++i) {
