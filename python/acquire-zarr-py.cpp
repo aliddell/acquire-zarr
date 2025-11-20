@@ -31,7 +31,7 @@ struct ArrayLifetimeProps
     std::vector<uint32_t> array_sizes;
     std::vector<uint32_t> chunk_sizes;
     std::vector<uint32_t> shard_sizes;
-    std::vector<std::string> dimension_order;  // Optional: target dimension order
+    std::vector<std::string> dimension_order;
 
     ZarrCompressionSettings compression;
     bool has_compression{ false };
@@ -79,7 +79,6 @@ struct ArrayLifetimeProps
         array_settings_.downsampling_method =
           downsampling_method.value_or(ZarrDownsamplingMethod_Mean);
 
-        // Set dimension order if provided
         if (!dimension_order.empty()) {
             dimension_order_ptrs_.clear();
             dimension_order_ptrs_.reserve(dimension_order.size());
@@ -98,7 +97,7 @@ struct ArrayLifetimeProps
 
   private:
     ZarrArraySettings array_settings_{};
-    std::vector<const char*> dimension_order_ptrs_;  // Store pointers for C API
+    std::vector<const char*> dimension_order_ptrs_;
 };
 
 struct FieldOfViewLifetimeProps

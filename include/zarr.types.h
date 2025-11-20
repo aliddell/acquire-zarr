@@ -136,8 +136,8 @@ extern "C"
      * @note The dimensions array may be allocated with ZarrArraySettings_create_dimension_array
      * and freed with ZarrArraySettings_destroy_dimension_array. The order in which you
      * set the dimension properties in the array should match the order of the dimensions
-     * from slowest to fastest changing, for example, [Z, Y, X] for a 3D dataset.
-     * @note To enable automatic dimension reordering (e.g., for OME-NGFF compliance, which
+     * during aquisition from slowest to fastest changing, for example, [Z, Y, X] for a 3D dataset.
+     * @note To write a transposed target dimension_order (e.g., for OME-NGFF compliance, which
      * currently requires TCZYX order), set dimension_order to an array of dimension names
      * in the desired output order. MUST match the names in the dimensions array.
      * If dimension_order is NULL, dimensions will be stored in the order provided. 
