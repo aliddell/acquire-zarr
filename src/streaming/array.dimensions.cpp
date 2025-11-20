@@ -13,7 +13,7 @@ ArrayDimensions::ArrayDimensions(
   , number_of_shards_(1)
   , bytes_per_chunk_(zarr::bytes_of_type(dtype))
   , number_of_chunks_in_memory_(1)
-  , transpose_state_(nullptr)  // Start with no transposition
+  , transpose_state_(nullptr) // Start with no transposition
 {
     EXPECT(dims.size() > 2, "Array must have at least three dimensions.");
 
@@ -44,7 +44,10 @@ ArrayDimensions::ArrayDimensions(
                target_dim_order.size());
 
         // Validate that dimension 0 is not transposed away
-        EXPECT(target_dim_order[0] == transpose_state_->acquisition_dims[0].name,
+        // the codebase currently treats dimension 0 specially in several places
+        // and we do not yet support moving it
+        EXPECT(target_dim_order[0] ==
+                 transpose_state_->acquisition_dims[0].name,
                "Transposing dimension 0 ('",
                transpose_state_->acquisition_dims[0].name,
                "') away from position 0 is not currently supported. "
@@ -61,8 +64,10 @@ ArrayDimensions::ArrayDimensions(
             // Find this name in acquisition dims
             bool found = false;
             for (size_t acq_idx = 0; acq_idx < n; ++acq_idx) {
-                if (transpose_state_->acquisition_dims[acq_idx].name == target_name) {
-                    dims_[target_idx] = transpose_state_->acquisition_dims[acq_idx];
+                if (transpose_state_->acquisition_dims[acq_idx].name ==
+                    target_name) {
+                    dims_[target_idx] =
+                      transpose_state_->acquisition_dims[acq_idx];
                     transpose_state_->acq_to_canonical[acq_idx] = target_idx;
                     transpose_state_->canonical_to_acq[target_idx] = acq_idx;
                     found = true;
@@ -78,7 +83,8 @@ ArrayDimensions::ArrayDimensions(
 
         // Validate the reordered dimensions have spatial dims at the end
         EXPECT(dims_[n - 2].type == ZarrDimensionType_Space,
-               "After reordering, second-to-last dimension must be spatial (Y axis)");
+               "After reordering, second-to-last dimension must be spatial (Y "
+               "axis)");
         EXPECT(dims_[n - 1].type == ZarrDimensionType_Space,
                "After reordering, last dimension must be spatial (X axis)");
 
@@ -411,10 +417,11 @@ ArrayDimensions::transpose_frame_id(uint64_t frame_id) const
         return frame_id;
     }
 
-    // NOTE: 
-    // We could potentially pre-compute a lookup table for frame_id transposition,
-    // but only for fixed-size dimensions. (Append dimensions would still need
-    // on-the-fly computation?).  Opted for simpler on-the-fly computation for now.
+    // NOTE:
+    // We could potentially pre-compute a lookup table for frame_id
+    // transposition, but only for fixed-size dimensions. (Append dimensions
+    // would still need on-the-fly computation?).  Opted for simpler on-the-fly
+    // computation for now.
 
     const auto n = ndims();
 
@@ -452,17 +459,20 @@ ArrayDimensions::transpose_frame_id(uint64_t frame_id) const
         }
     }
 
-    // Step 1: Calculate strides in acquisition order (only for non-spatial dims)
-    // frame_id encodes non-spatial dimensions only. The last two dims are spatial (Y, X).
+    // Step 1: Calculate strides in acquisition order (only for non-spatial
+    // dims) frame_id encodes non-spatial dimensions only. The last two dims are
+    // spatial (Y, X).
     if (n > 2) {
         acq_strides[n - 3] = 1;
         for (int i = static_cast<int>(n) - 4; i >= 0; --i) {
             acq_strides[i] =
-              acq_strides[i + 1] * transpose_state_->acquisition_dims[i + 1].array_size_px;
+              acq_strides[i + 1] *
+              transpose_state_->acquisition_dims[i + 1].array_size_px;
         }
     }
 
-    // Step 2: Convert linear frame_id to multi-dimensional coordinates in acquisition order
+    // Step 2: Convert linear frame_id to multi-dimensional coordinates in
+    // acquisition order
     uint64_t remaining = frame_id;
     for (size_t i = 0; i < n - 2; ++i) {
         acq_coords[i] = remaining / acq_strides[i];
