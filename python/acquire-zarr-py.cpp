@@ -87,9 +87,6 @@ struct ArrayLifetimeProps
             }
             array_settings_.dimension_order = dimension_order_ptrs_.data();
             array_settings_.dimension_order_count = dimension_order_ptrs_.size();
-        } else {
-            array_settings_.dimension_order = nullptr;
-            array_settings_.dimension_order_count = 0;
         }
 
         return &array_settings_;
