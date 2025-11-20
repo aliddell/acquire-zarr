@@ -30,9 +30,9 @@ ArrayDimensions::ArrayDimensions(
     if (target_dim_order.empty()) {
         dims_ = std::move(dims);
     } else {
-        // User requested transposition - initialize state
-        transpose_state_.emplace();
-        transpose_state_->acquisition_dims = std::move(dims);
+        // User requested transposition - initialize map
+        transpose_map_.emplace();
+        transpose_map_->acquisition_dims = std::move(dims);
 
         // Validate target order
         EXPECT(target_dim_order.size() == n,
@@ -45,15 +45,15 @@ ArrayDimensions::ArrayDimensions(
         // the codebase currently treats dimension 0 specially in several places
         // and we do not yet support moving it
         EXPECT(target_dim_order[0] ==
-                 transpose_state_->acquisition_dims[0].name,
+                 transpose_map_->acquisition_dims[0].name,
                "Transposing dimension 0 ('",
-               transpose_state_->acquisition_dims[0].name,
+               transpose_map_->acquisition_dims[0].name,
                "') away from position 0 is not currently supported. "
                "The first dimension must remain first in storage_dimension_order.");
 
         // Build index mapping
-        transpose_state_->acq_to_storage.resize(n);
-        transpose_state_->storage_to_acq.resize(n);
+        transpose_map_->acq_to_storage.resize(n);
+        transpose_map_->storage_to_acq.resize(n);
 
         dims_.resize(n);
         for (size_t target_idx = 0; target_idx < n; ++target_idx) {
@@ -62,12 +62,12 @@ ArrayDimensions::ArrayDimensions(
             // Find this name in acquisition dims
             bool found = false;
             for (size_t acq_idx = 0; acq_idx < n; ++acq_idx) {
-                if (transpose_state_->acquisition_dims[acq_idx].name ==
+                if (transpose_map_->acquisition_dims[acq_idx].name ==
                     target_name) {
                     dims_[target_idx] =
-                      transpose_state_->acquisition_dims[acq_idx];
-                    transpose_state_->acq_to_storage[acq_idx] = target_idx;
-                    transpose_state_->storage_to_acq[target_idx] = acq_idx;
+                      transpose_map_->acquisition_dims[acq_idx];
+                    transpose_map_->acq_to_storage[acq_idx] = target_idx;
+                    transpose_map_->storage_to_acq[target_idx] = acq_idx;
                     found = true;
                     break;
                 }
@@ -93,15 +93,15 @@ ArrayDimensions::ArrayDimensions(
         // Check if transposition is actually needed (might be identity)
         bool is_identity = true;
         for (size_t i = 0; i < n; ++i) {
-            if (transpose_state_->acq_to_storage[i] != i) {
+            if (transpose_map_->acq_to_storage[i] != i) {
                 is_identity = false;
                 break;
             }
         }
 
-        // If it's identity, clear the transposition state
+        // If it's identity, clear the transposition map
         if (is_identity) {
-            transpose_state_.reset();
+            transpose_map_.reset();
         }
     }
 
@@ -407,13 +407,13 @@ ArrayDimensions::storage_dimension(size_t idx) const
 bool
 ArrayDimensions::needs_transposition() const
 {
-    return transpose_state_.has_value();
+    return transpose_map_.has_value();
 }
 
 bool
 ArrayDimensions::needs_spatial_transposition() const
 {
-    if (!transpose_state_) {
+    if (!transpose_map_) {
         return false;
     }
 
@@ -421,32 +421,32 @@ ArrayDimensions::needs_spatial_transposition() const
     // Check if the last two spatial dimensions (height and width) are swapped.
     // If acq[n-2] maps to storage_order[n-1] and acq[n-1] maps to storage_order[n-2],
     // then height and width are swapped (Y↔X).
-    return transpose_state_->acq_to_storage[n - 2] == n - 1 &&
-           transpose_state_->acq_to_storage[n - 1] == n - 2;
+    return transpose_map_->acq_to_storage[n - 2] == n - 1 &&
+           transpose_map_->acq_to_storage[n - 1] == n - 2;
 }
 
 uint32_t
 ArrayDimensions::acquisition_frame_rows() const
 {
     const auto n = ndims();
-    if (!transpose_state_) {
+    if (!transpose_map_) {
         // No transposition, acquisition order = storage order
         return dims_[n - 2].array_size_px;
     }
     // Return height from acquisition dimensions
-    return transpose_state_->acquisition_dims[n - 2].array_size_px;
+    return transpose_map_->acquisition_dims[n - 2].array_size_px;
 }
 
 uint32_t
 ArrayDimensions::acquisition_frame_cols() const
 {
     const auto n = ndims();
-    if (!transpose_state_) {
+    if (!transpose_map_) {
         // No transposition, acquisition order = storage order
         return dims_[n - 1].array_size_px;
     }
     // Return width from acquisition dimensions
-    return transpose_state_->acquisition_dims[n - 1].array_size_px;
+    return transpose_map_->acquisition_dims[n - 1].array_size_px;
 }
 
 // Transpose a frame ID from acquisition order to output storage_dimension_order
@@ -454,7 +454,7 @@ uint64_t
 ArrayDimensions::transpose_frame_id(uint64_t frame_id) const
 {
     // Fast path: no transposition needed
-    if (!transpose_state_) {
+    if (!transpose_map_) {
         return frame_id;
     }
 
@@ -509,7 +509,7 @@ ArrayDimensions::transpose_frame_id(uint64_t frame_id) const
         for (int i = static_cast<int>(n) - 4; i >= 0; --i) {
             acq_strides[i] =
               acq_strides[i + 1] *
-              transpose_state_->acquisition_dims[i + 1].array_size_px;
+              transpose_map_->acquisition_dims[i + 1].array_size_px;
         }
     }
 
@@ -526,7 +526,7 @@ ArrayDimensions::transpose_frame_id(uint64_t frame_id) const
 
     // Step 3: Permute coordinates from acquisition order to storage order
     for (size_t i = 0; i < n; ++i) {
-        stor_coords[transpose_state_->acq_to_storage[i]] = acq_coords[i];
+        stor_coords[transpose_map_->acq_to_storage[i]] = acq_coords[i];
     }
 
     // Step 4: Calculate strides in storage dimension order

@@ -200,7 +200,7 @@ class ArrayDimensions
     uint64_t transpose_frame_id(uint64_t frame_id) const;
 
   private:
-    struct TranspositionState
+    struct TranspositionMap
     {
         std::vector<ZarrDimension>
           acquisition_dims;                 // Original acquisition order
@@ -209,7 +209,7 @@ class ArrayDimensions
     };
 
     std::vector<ZarrDimension> dims_; // Dimensions in storage order
-    std::optional<TranspositionState> transpose_state_;
+    std::optional<TranspositionMap> transpose_map_;
 
     ZarrDataType dtype_;
 
