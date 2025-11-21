@@ -4,8 +4,10 @@
 
 #include <ranges>
 
+const static std::string shard_file_path(TEST ".bin");
+
 namespace {
-class TestShard : public zarr::Shard
+class TestShard final : public zarr::Shard
 {
   public:
     explicit TestShard(zarr::ShardConfig&& config,
@@ -14,21 +16,22 @@ class TestShard : public zarr::Shard
     {
     }
 
-    const std::unordered_map<uint32_t, std::vector<uint8_t>>& chunks()
-    {
-        return chunks_;
-    }
-    size_t flush_count() const { return flush_count_; }
+    const std::map<uint32_t, std::vector<uint8_t>>& chunks() { return chunks_; }
+    bool has_flushed() const { return has_flushed_; }
 
   protected:
-    bool compress_and_flush_chunks_() override
+    // this is called when chunks are flushed
+    bool write_to_offset_(const std::vector<uint8_t>& chunk,
+                          size_t offset) override
     {
-        ++flush_count_;
+        has_flushed_.store(true);
         return true;
     }
 
+    void clean_up_resource_() override {}
+
   private:
-    size_t flush_count_{ 0 };
+    std::atomic<bool> has_flushed_{ false };
 };
 } // namespace
 
@@ -66,14 +69,15 @@ main()
           tile_size_px * array_dimensions->bytes_of_type();
 
         zarr::ShardConfig config{
-            .shard_index = 0,
+            .shard_grid_index = 0,
+            .append_shard_index = 0,
             .dims = array_dimensions,
-            .path = TEST ".zarr",
+            .path = shard_file_path,
         };
 
         TestShard shard(std::move(config), thread_pool);
 
-        CHECK(shard.flush_count() == 0);
+        CHECK(!shard.has_flushed());
 
         const auto& chunks = shard.chunks();
         EXPECT(chunks.size() == chunks_per_shard,
@@ -132,7 +136,7 @@ main()
         }
 
         // should not have flushed
-        CHECK(shard.flush_count() == 0);
+        CHECK(!shard.has_flushed());
 
         retval = 0;
     } catch (const std::exception& e) {

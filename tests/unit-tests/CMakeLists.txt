@@ -29,6 +29,7 @@ set(tests
         plate
         shard-write-frame
         shard-flush
+        fsshard-flush
 )
 
 foreach (name ${tests})

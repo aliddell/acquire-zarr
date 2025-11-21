@@ -684,8 +684,7 @@ zarr::Array::compress_and_flush_data_()
             // the entire lifetime of the stream
             if (thread_pool_->n_threads() == 1 ||
                 !thread_pool_->push_job(job)) {
-                std::string err;
-                if (!job(err)) {
+                if (std::string err; !job(err)) {
                     LOG_ERROR(err);
                 }
             }

@@ -4,7 +4,7 @@
 #include "shard.hh"
 
 namespace zarr {
-class FSShard : public Shard
+class FSShard final : public Shard
 {
   public:
     FSShard(ShardConfig&& config,
@@ -13,7 +13,12 @@ class FSShard : public Shard
 
   protected:
     std::shared_ptr<FileHandlePool> file_handle_pool_;
+    std::shared_ptr<void> file_handle_;
+    std::mutex handle_mutex_;
 
-    bool compress_and_flush_chunks_() override;
+    bool write_to_offset_(const std::vector<uint8_t>& chunk,
+                          size_t offset) override;
+
+    void clean_up_resource_() override;
 };
 } // namespace zarr

@@ -88,12 +88,12 @@ class ArrayDimensions
      * @brief Check whether the frame with ID @p frame_id is written to chunks
      * in the shard @p shard_index.
      * @param frame_id The frame ID.
-     * @param shard_index The index of the shard to check.
+     * @param shard_grid_index The index of the shard to check.
      * @return True if the frame is written to chunks within the shard,
      * otherwise false.
      */
-    [[nodiscard]] bool frame_in_shard(uint64_t frame_id,
-                                      uint32_t shard_index) const;
+    [[nodiscard]] bool frame_is_in_shard(uint64_t frame_id,
+                                         uint32_t shard_grid_index) const;
 
     /**
      * @brief Get the number of chunks to hold in memory.

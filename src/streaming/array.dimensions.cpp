@@ -156,10 +156,11 @@ ArrayDimensions::chunk_internal_offset(uint64_t frame_id) const
 }
 
 bool
-ArrayDimensions::frame_in_shard(uint64_t frame_id, uint32_t shard_index) const
+ArrayDimensions::frame_is_in_shard(uint64_t frame_id,
+                                   uint32_t shard_grid_index) const
 {
     const auto group_offset = tile_group_offset(frame_id);
-    const auto& chunk_indices = chunk_indices_for_shard_.at(shard_index);
+    const auto& chunk_indices = chunk_indices_for_shard_.at(shard_grid_index);
 
     return std::ranges::find(chunk_indices, group_offset) !=
            chunk_indices.end();
