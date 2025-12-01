@@ -29,12 +29,13 @@ set(tests
         plate
         shard-write-frame
         shard-flush
-        fsshard-flush
+        fs-shard-flush
+        s3-shard-flush
 )
 
 foreach (name ${tests})
     set(tgt "${project}-unit-test-${name}")
-    add_executable(${tgt} ${name}.cpp unit.test.macros.hh)
+    add_executable(${tgt} ${name}.cpp unit-test-utils.cpp)
     target_compile_definitions(${tgt} PUBLIC "TEST=\"${tgt}\"")
     set_target_properties(${tgt} PROPERTIES
             MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"

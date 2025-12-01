@@ -1,44 +1,31 @@
-#include "shard.hh"
 #include "unit-test-utils.hh"
+#include "s3.shard.hh"
 #include "zarr.common.hh"
 
+#include <miniocpp/client.h>
+
+#include <filesystem>
+
+namespace fs = std::filesystem;
+
 const static std::string shard_file_path(TEST ".bin");
-
-namespace {
-class TestShard final : public zarr::Shard
-{
-  public:
-    explicit TestShard(zarr::ShardConfig&& config,
-                       std::shared_ptr<zarr::ThreadPool> thread_pool)
-      : Shard(std::move(config), thread_pool)
-    {
-    }
-
-    bool has_flushed() const { return has_flushed_; }
-
-  protected:
-    // this is called when chunks are flushed
-    bool write_to_offset_(const std::vector<uint8_t>& chunk,
-                          size_t offset) override
-    {
-        has_flushed_.store(true);
-        return true;
-    }
-
-    void clean_up_resource_() override {}
-
-  private:
-    std::atomic<bool> has_flushed_{ false };
-};
-} // namespace
 
 int
 main()
 {
+    zarr::S3Settings settings;
+    if (!testing::get_s3_settings(settings)) {
+        LOG_WARNING("Failed to get credentials. Skipping test.");
+        return 0;
+    }
+
     int retval = 1;
 
     auto thread_pool = std::make_shared<zarr::ThreadPool>(
-      0, [](const std::string& err) { LOG_ERROR(err); });
+      1, [](const std::string& err) { std::cerr << err << std::endl; });
+
+    auto connection_pool =
+      std::make_shared<zarr::S3ConnectionPool>(1, settings);
 
     std::vector<ZarrDimension> dims(5);
     dims[0] = ZarrDimension("t", ZarrDimensionType_Time, 0, 32, 2);
@@ -57,6 +44,17 @@ main()
         frames_per_chunk *= dims[i].array_size_px;
     }
 
+    size_t bytes_per_chunk = zarr::bytes_of_type(ZarrDataType_uint16);
+    size_t chunks_per_shard = 1;
+    for (const auto& dim : dims) {
+        bytes_per_chunk *= dim.chunk_size_px;
+        chunks_per_shard *= dim.shard_size_chunks;
+    }
+
+    // just flushing one layer
+    const size_t expected_object_size =
+      bytes_per_chunk * chunks_per_shard / dims[0].shard_size_chunks;
+
     try {
         auto array_dimensions = std::make_shared<ArrayDimensions>(
           std::move(dims), ZarrDataType_uint16);
@@ -68,8 +66,11 @@ main()
             .path = shard_file_path,
         };
 
-        TestShard shard(std::move(config), thread_pool);
-        CHECK(!shard.has_flushed());
+        zarr::S3Shard shard(std::move(config), thread_pool, connection_pool);
+
+        if (fs::exists(shard_file_path)) {
+            fs::remove_all(shard_file_path);
+        }
 
         std::vector<uint16_t> frame(2048 * 2048, 1);
         const std::span frame_span{ reinterpret_cast<uint8_t*>(frame.data()),
@@ -83,7 +84,7 @@ main()
 
             // we have 4 shards, so we should only have written 1/4 of the frame
             EXPECT(bytes_written == expected_bytes_written,
-                   "Expected to write most ",
+                   "Expected to write ",
                    expected_bytes_written,
                    " bytes, wrote ",
                    bytes_written,
@@ -92,7 +93,7 @@ main()
                    ")");
 
             // should not have flushed
-            CHECK(!shard.has_flushed());
+            CHECK(!fs::exists(shard_file_path));
         }
 
         // write the final frame in the shard
@@ -110,14 +111,38 @@ main()
                    expected_bytes_written,
                    " bytes, wrote ",
                    bytes_written);
-
-            // should have flushed
-            EXPECT(shard.has_flushed(), "Shard should have flushed, did not");
         }
+        EXPECT(shard.close(), "Shard did not close successfully");
+
+        // should have flushed
+        auto conn = connection_pool->get_connection();
+        EXPECT(conn->object_exists(settings.bucket_name, shard_file_path),
+               "Expected shard object at ",
+               shard_file_path,
+               ", but it was missing (failed to flush).");
+
+        const auto actual_object_size =
+          conn->get_object_size(settings.bucket_name, shard_file_path);
+        EXPECT(actual_object_size == expected_object_size,
+               "Expected an object size of ",
+               expected_object_size,
+               ", got ",
+               actual_object_size);
+
+        EXPECT(conn->delete_object(settings.bucket_name, shard_file_path),
+               "Failed to remove ",
+               shard_file_path,
+               " from bucket ",
+               settings.bucket_name);
+        connection_pool->return_connection(std::move(conn));
 
         retval = 0;
     } catch (const std::exception& e) {
         LOG_ERROR(e.what());
+    }
+
+    if (fs::exists(shard_file_path)) {
+        fs::remove_all(shard_file_path);
     }
 
     return retval;

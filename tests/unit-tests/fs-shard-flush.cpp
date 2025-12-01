@@ -1,5 +1,5 @@
 #include "fs.shard.hh"
-#include "unit.test.macros.hh"
+#include "unit-test-utils.hh"
 #include "zarr.common.hh"
 
 #include <filesystem>

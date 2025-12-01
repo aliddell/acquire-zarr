@@ -51,6 +51,17 @@ class S3Connection
                        std::string_view object_name);
 
     /**
+     * @brief Get the size in bytes of the S3 object @p object_name living in
+     * the bucket @p bucket_name.
+     * @param bucket_name The bucket where the object lives.
+     * @param object_name The name of the object.
+     * @return The size of @p object_name, in bytes, or 0 if the object does not
+     * exist.
+     */
+    size_t get_object_size(std::string_view bucket_name,
+                           std::string_view object_name);
+
+    /**
      * @brief Put an object.
      * @param bucket_name The name of the bucket to put the object in.
      * @param object_name The name of the object.

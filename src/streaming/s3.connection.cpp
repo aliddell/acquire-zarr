@@ -87,6 +87,24 @@ zarr::S3Connection::object_exists(std::string_view bucket_name,
     return static_cast<bool>(response);
 }
 
+size_t
+zarr::S3Connection::get_object_size(std::string_view bucket_name,
+                                    std::string_view object_name)
+{
+    minio::s3::StatObjectArgs args;
+    args.bucket = bucket_name;
+    args.object = object_name;
+
+    minio::s3::StatObjectResponse response = impl_->client->StatObject(args);
+
+    if (!response) {
+        LOG_ERROR("Failed to get object size: ", object_name);
+        return 0;
+    }
+
+    return response.size;
+}
+
 std::string
 zarr::S3Connection::put_object(std::string_view bucket_name,
                                std::string_view object_name,
