@@ -52,15 +52,19 @@ DIMS = {
 
 
 @pytest.mark.parametrize(
-    "input_dims,output_dims",
+    "input_dims,output_dims,append_dim_size",
     [
-        (["t", "c", "z", "y", "x"], None),
-        (["t", "c", "z", "y", "x"], ["t", "c", "z", "y", "x"]),
-        (["t", "z", "c", "y", "x"], ["t", "c", "z", "y", "x"]),
+        (["t", "c", "z", "y", "x"], None, None),
+        (["t", "c", "z", "y", "x"], ["t", "c", "z", "y", "x"], None),
+        (["t", "z", "c", "y", "x"], ["t", "c", "z", "y", "x"], None),
+        (["t", "z", "c", "y", "x"], ["t", "c", "z", "y", "x"], 5),  # unbounded dim 0
     ],
 )
 def test_dimension_transposition(
-    store_path: Path, input_dims: list[str], output_dims: list[str] | None
+    store_path: Path,
+    input_dims: list[str],
+    output_dims: list[str] | None,
+    append_dim_size: int | None,
 ):
     """
     Test that data received in `input_dims` order is correctly stored
@@ -70,17 +74,42 @@ def test_dimension_transposition(
     corresponds to iterating through the append dimensions in input_dims order.
     The test verifies that these frames end up in the correct positions when
     stored according to output_dims order.
+
+    If append_dim_size is provided, dimension 0 is treated as unbounded
+    (array_size_px=0) and append_dim_size specifies the actual number of
+    elements to write along that dimension.
     """
+    # Build dimensions, creating a new object for dim 0 if unbounded
+    dimensions = []
+    for i, name in enumerate(input_dims):
+        dim = DIMS[name]
+        if i == 0 and append_dim_size is not None:
+            dim = Dimension(  # copy with array_size_px=0
+                name=dim.name,
+                kind=dim.kind,
+                array_size_px=0,
+                chunk_size_px=dim.chunk_size_px,
+                shard_size_chunks=dim.shard_size_chunks,
+            )
+        dimensions.append(dim)
+
     array = ArraySettings(
-        dimensions=[DIMS[name] for name in input_dims],
+        dimensions=dimensions,
         storage_dimension_order=output_dims,
     )
     settings = StreamSettings(store_path=str(store_path), arrays=[array])
     stream = ZarrStream(settings)
 
+    # Calculate shapes, using append_dim_size for unbounded dimension
     output_dims = input_dims if output_dims is None else output_dims
-    input_shape = tuple(DIMS[n].array_size_px for n in input_dims)
-    output_shape = tuple(DIMS[n].array_size_px for n in output_dims)
+
+    def _get_size(name: str) -> int:
+        if name == input_dims[0] and append_dim_size is not None:
+            return append_dim_size
+        return DIMS[name].array_size_px
+
+    input_shape = tuple(_get_size(n) for n in input_dims)
+    output_shape = tuple(_get_size(n) for n in output_dims)
     n_frames = np.prod(input_shape[:-2])
     if output_dims and output_dims != input_dims:
         assert input_shape != output_shape, (

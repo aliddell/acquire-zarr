@@ -202,10 +202,14 @@ class ArrayDimensions
   private:
     struct TranspositionMap
     {
-        std::vector<ZarrDimension>
-          acquisition_dims;                 // Original acquisition order
+        // Original acquisition order
+        std::vector<ZarrDimension> acquisition_dims;
         std::vector<size_t> acq_to_storage; // Maps acq index -> storage index
         std::vector<size_t> storage_to_acq; // Maps storage index -> acq index
+        // Pre-computed: acq_frame_id -> storage_frame_id
+        std::vector<uint64_t> frame_id_lookup;
+        // 0 = use full lookup; >0 = frames per append-dim increment
+        uint64_t inner_frame_count{ 0 };
     };
 
     static std::pair<std::vector<ZarrDimension>,

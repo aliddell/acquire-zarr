@@ -2,9 +2,6 @@
 #include "macros.hh"
 #include "zarr.common.hh"
 
-#include <algorithm>
-#include <array>
-#include <span>
 #include <tuple>
 #include <unordered_map>
 
@@ -79,6 +76,64 @@ ArrayDimensions::compute_transposition(
 
     if (is_identity) {
         return { std::move(storage_dims), std::nullopt };
+    }
+
+    // Pre-compute the frame_id lookup table.
+    // If dim 0 is unbounded (array_size_px == 0), we only pre-compute for
+    // the inner dimensions since dim 0 cannot be transposed away.
+    const bool dim0_unbounded = (map.acquisition_dims[0].array_size_px == 0);
+    const size_t start_dim = dim0_unbounded ? 1 : 0;
+    const size_t frame_dims = n - 2;  // Total frame-addressable dimensions
+    const size_t lookup_dims = frame_dims - start_dim;  // Dims in lookup table
+
+    uint64_t lookup_size = 1;
+    for (size_t i = start_dim; i < n - 2; ++i) {
+        lookup_size *= map.acquisition_dims[i].array_size_px;
+    }
+
+    map.frame_id_lookup.resize(lookup_size);
+    map.inner_frame_count = dim0_unbounded ? lookup_size : 0;
+
+    // Pre-compute strides for acquisition and storage orders.
+    // Only need strides for dimensions included in the lookup table.
+    std::vector<uint64_t> acq_strides(lookup_dims, 1);
+    std::vector<uint64_t> stor_strides(lookup_dims, 1);
+
+    for (size_t i = lookup_dims - 1; i > 0; --i) {
+        const size_t dim_idx = start_dim + i;
+        acq_strides[i - 1] =
+          acq_strides[i] * map.acquisition_dims[dim_idx].array_size_px;
+        stor_strides[i - 1] =
+          stor_strides[i] * storage_dims[dim_idx].array_size_px;
+    }
+
+    // Compute transposed frame_id for each acquisition frame_id.
+    std::vector<uint64_t> acq_coords(lookup_dims);
+    std::vector<uint64_t> stor_coords(lookup_dims);
+
+    for (uint64_t frame_id = 0; frame_id < lookup_size; ++frame_id) {
+        // Convert linear frame_id to multi-dimensional coordinates
+        uint64_t remaining = frame_id;
+        for (size_t i = 0; i < lookup_dims; ++i) {
+            acq_coords[i] = remaining / acq_strides[i];
+            remaining %= acq_strides[i];
+        }
+
+        // Permute coordinates from acquisition order to storage order.
+        // Need to map through acq_to_storage, adjusting for start_dim offset.
+        for (size_t i = 0; i < lookup_dims; ++i) {
+            const size_t acq_idx = start_dim + i;
+            const size_t stor_idx = map.acq_to_storage[acq_idx];
+            stor_coords[stor_idx - start_dim] = acq_coords[i];
+        }
+
+        // Convert storage coordinates back to linear frame_id
+        uint64_t storage_frame_id = 0;
+        for (size_t i = 0; i < lookup_dims; ++i) {
+            storage_frame_id += stor_coords[i] * stor_strides[i];
+        }
+
+        map.frame_id_lookup[frame_id] = storage_frame_id;
     }
 
     return { std::move(storage_dims), std::move(map) };
@@ -415,7 +470,7 @@ ArrayDimensions::needs_transposition() const
 }
 
 bool
-ArrayDimensions::needs_spatial_transposition() const
+ArrayDimensions::needs_xy_transposition() const
 {
     if (!transpose_map_) {
         return false;
@@ -457,99 +512,19 @@ ArrayDimensions::acquisition_frame_cols() const
 uint64_t
 ArrayDimensions::transpose_frame_id(uint64_t frame_id) const
 {
-    // Fast path: no transposition needed
     if (!transpose_map_) {
         return frame_id;
     }
 
-    // NOTE:
-    // We could potentially pre-compute a lookup table for frame_id
-    // transposition, but only for fixed-size dimensions. (Append dimensions
-    // would still need on-the-fly computation?).  Opted for simpler on-the-fly
-    // computation for now.
-
-    const auto n = ndims();
-
-    // Use stack-allocated arrays for common case (most acquisitions have 3-7
-    // dimensions). This avoids heap allocations on every frame write.
-    constexpr size_t kMaxStackDims = 8;
-    std::array<uint64_t, kMaxStackDims> acq_coords_stack{};
-    std::array<uint64_t, kMaxStackDims> stor_coords_stack{};
-    std::array<uint64_t, kMaxStackDims> acq_strides_stack{};
-    std::array<uint64_t, kMaxStackDims> stor_strides_stack{};
-
-    // Fallback to heap allocation for unusual cases with many dimensions
-    std::vector<uint64_t> acq_coords_heap;
-    std::vector<uint64_t> stor_coords_heap;
-    std::vector<uint64_t> acq_strides_heap;
-    std::vector<uint64_t> stor_strides_heap;
-
-    std::span<uint64_t> acq_coords(acq_coords_stack);
-    std::span<uint64_t> stor_coords(stor_coords_stack);
-    std::span<uint64_t> acq_strides(acq_strides_stack);
-    std::span<uint64_t> stor_strides(stor_strides_stack);
-
-    if (n > kMaxStackDims) {
-        acq_coords_heap.resize(n);
-        stor_coords_heap.resize(n);
-        acq_strides_heap.resize(n);
-        stor_strides_heap.resize(n);
-        acq_coords = std::span(acq_coords_heap);
-        stor_coords = std::span(stor_coords_heap);
-        acq_strides = std::span(acq_strides_heap);
-        stor_strides = std::span(stor_strides_heap);
-    } else {
-        acq_coords = acq_coords.first(n);
-        stor_coords = stor_coords.first(n);
-        acq_strides = acq_strides.first(n);
-        stor_strides = stor_strides.first(n);
+    const auto& map = *transpose_map_;
+    if (map.inner_frame_count > 0) {
+        // Dim 0 is unbounded: lookup only covers inner dimensions.
+        // frame_id = outer_index * inner_frame_count + inner_offset
+        // Since dim 0 doesn't move, outer_index stays the same.
+        const auto outer = frame_id / map.inner_frame_count;
+        const auto inner = frame_id % map.inner_frame_count;
+        return outer * map.inner_frame_count + map.frame_id_lookup[inner];
     }
 
-    std::ranges::fill(acq_strides, 1);
-    std::ranges::fill(stor_strides, 1);
-
-    // Step 1: Calculate strides in acquisition order for every frame-addressable
-    // axis (all dimensions except the trailing plane axes). frame_id enumerates
-    // only dims[0..n-3]; the final two spatial dimensions (typically Y, X) stay
-    // at zero in this coordinate space.
-    if (n > 2) {
-        acq_strides[n - 3] = 1;
-        for (int i = static_cast<int>(n) - 4; i >= 0; --i) {
-            acq_strides[i] =
-              acq_strides[i + 1] *
-              transpose_map_->acquisition_dims[i + 1].array_size_px;
-        }
-    }
-
-    // Step 2: Convert linear frame_id to multi-dimensional coordinates in
-    // acquisition order
-    uint64_t remaining = frame_id;
-    for (size_t i = 0; i < n - 2; ++i) {
-        acq_coords[i] = remaining / acq_strides[i];
-        remaining %= acq_strides[i];
-    }
-    // Spatial dimensions (last 2) are always 0 in frame_id space
-    acq_coords[n - 2] = 0;
-    acq_coords[n - 1] = 0;
-
-    // Step 3: Permute coordinates from acquisition order to storage order
-    for (size_t i = 0; i < n; ++i) {
-        stor_coords[transpose_map_->acq_to_storage[i]] = acq_coords[i];
-    }
-
-    // Step 4: Calculate strides in storage dimension order
-    if (n > 2) {
-        stor_strides[n - 3] = 1;
-        for (int i = static_cast<int>(n) - 4; i >= 0; --i) {
-            stor_strides[i] = stor_strides[i + 1] * dims_[i + 1].array_size_px;
-        }
-    }
-
-    // Step 5: Convert storage dimension coordinates back to linear frame_id
-    uint64_t storage_frame_id = 0;
-    for (size_t i = 0; i < n - 2; ++i) {
-        storage_frame_id += stor_coords[i] * stor_strides[i];
-    }
-
-    return storage_frame_id;
+    return map.frame_id_lookup[frame_id];
 }

@@ -475,7 +475,7 @@ zarr::Array::write_frame_to_chunks_(LockedBuffer& data)
 
     // Check if we need to transpose spatial dimensions (Y↔X)
     std::vector<uint8_t> transposed_frame;
-    if (dimensions->needs_spatial_transposition()) {
+    if (dimensions->needs_xy_transposition()) {
         const auto acq_rows = dimensions->acquisition_frame_rows();
         const auto acq_cols = dimensions->acquisition_frame_cols();
 
