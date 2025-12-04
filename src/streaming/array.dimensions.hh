@@ -76,7 +76,7 @@ class ArrayDimensions
      * @return True if the last two dimensions are swapped between acquisition
      *         and storage order.
      */
-    bool needs_spatial_transposition() const;
+    bool needs_xy_transposition() const;
 
     /**
      * @brief Get the number of rows in frames as they arrive (acquisition
