@@ -187,11 +187,11 @@ make_array_dimensions(const ZarrArraySettings* settings)
     }
 
     // Build target dimension order vector if specified
-    std::vector<std::string> target_order;
-    if (settings->storage_dimension_order && settings->storage_dimension_order_size > 0) {
-        target_order.reserve(settings->storage_dimension_order_size);
-        for (size_t i = 0; i < settings->storage_dimension_order_size; ++i) {
-            target_order.emplace_back(settings->storage_dimension_order[i]);
+    std::vector<size_t> target_order;
+    if (settings->storage_dimension_order) {
+        target_order.reserve(settings->dimension_count);
+        for (size_t i = 0; i < settings->dimension_count; ++i) {
+            target_order.push_back(settings->storage_dimension_order[i]);
         }
     }
 

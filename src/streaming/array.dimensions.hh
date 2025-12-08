@@ -47,7 +47,7 @@ class ArrayDimensions
   public:
     ArrayDimensions(std::vector<ZarrDimension>&& dims,
                     ZarrDataType dtype,
-                    const std::vector<std::string>& target_dim_order = {});
+                    const std::vector<size_t>& target_dim_order = {});
 
     size_t ndims() const;
 
@@ -215,7 +215,7 @@ class ArrayDimensions
     static std::pair<std::vector<ZarrDimension>,
                      std::optional<TranspositionMap>>
     compute_transposition(std::vector<ZarrDimension>&& acquisition_dims,
-                          const std::vector<std::string>& target_dim_order);
+                          const std::vector<size_t>& target_dim_order);
 
     std::vector<ZarrDimension> dims_; // Dimensions in storage order
     std::optional<TranspositionMap> transpose_map_;

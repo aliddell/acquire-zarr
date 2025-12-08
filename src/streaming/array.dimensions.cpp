@@ -9,7 +9,7 @@ std::pair<std::vector<ZarrDimension>,
           std::optional<ArrayDimensions::TranspositionMap>>
 ArrayDimensions::compute_transposition(
   std::vector<ZarrDimension>&& acquisition_dims,
-  const std::vector<std::string>& target_dim_order)
+  const std::vector<size_t>& target_dim_order)
 {
     if (target_dim_order.empty()) {
         return { std::move(acquisition_dims), std::nullopt };
@@ -19,7 +19,7 @@ ArrayDimensions::compute_transposition(
     TranspositionMap map;
     map.acquisition_dims = std::move(acquisition_dims);
 
-    // Validate target order
+    // Validate target order size matches dimension count
     EXPECT(target_dim_order.size() == n,
            "Target dimension order must have ",
            n,
@@ -27,36 +27,30 @@ ArrayDimensions::compute_transposition(
            target_dim_order.size());
 
     // Validate that dimension 0 is not transposed away
-    EXPECT(target_dim_order[0] == map.acquisition_dims[0].name,
+    EXPECT(target_dim_order[0] == 0,
            "Transposing dimension 0 ('",
            map.acquisition_dims[0].name,
            "') away from position 0 is not currently supported. "
            "The first dimension must remain first in storage_dimension_order.");
 
-    // Build index mapping
+    // Build index mapping from the permutation array
     map.acq_to_storage.resize(n);
     map.storage_to_acq.resize(n);
 
     std::vector<ZarrDimension> storage_dims(n);
-    for (size_t target_idx = 0; target_idx < n; ++target_idx) {
-        const auto& target_name = target_dim_order[target_idx];
+    for (size_t storage_idx = 0; storage_idx < n; ++storage_idx) {
+        const size_t acq_idx = target_dim_order[storage_idx];
 
-        // Find this name in acquisition dims
-        bool found = false;
-        for (size_t acq_idx = 0; acq_idx < n; ++acq_idx) {
-            if (map.acquisition_dims[acq_idx].name == target_name) {
-                storage_dims[target_idx] = map.acquisition_dims[acq_idx];
-                map.acq_to_storage[acq_idx] = target_idx;
-                map.storage_to_acq[target_idx] = acq_idx;
-                found = true;
-                break;
-            }
-        }
+        EXPECT(acq_idx < n,
+               "Invalid index ",
+               acq_idx,
+               " in storage_dimension_order (must be < ",
+               n,
+               ")");
 
-        EXPECT(found,
-               "Dimension name '",
-               target_name,
-               "' in target order not found in dimensions array");
+        storage_dims[storage_idx] = map.acquisition_dims[acq_idx];
+        map.acq_to_storage[acq_idx] = storage_idx;
+        map.storage_to_acq[storage_idx] = acq_idx;
     }
 
     // Validate the reordered dimensions have spatial dims at the end
@@ -142,7 +136,7 @@ ArrayDimensions::compute_transposition(
 ArrayDimensions::ArrayDimensions(
   std::vector<ZarrDimension>&& dims,
   ZarrDataType dtype,
-  const std::vector<std::string>& target_dim_order)
+  const std::vector<size_t>& target_dim_order)
   : dtype_(dtype)
   , chunks_per_shard_(1)
   , number_of_shards_(1)

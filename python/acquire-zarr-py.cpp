@@ -31,7 +31,7 @@ struct ArrayLifetimeProps
     std::vector<uint32_t> array_sizes;
     std::vector<uint32_t> chunk_sizes;
     std::vector<uint32_t> shard_sizes;
-    std::vector<std::string> storage_dimension_order;
+    std::vector<size_t> storage_dimension_order;
 
     ZarrCompressionSettings compression;
     bool has_compression{ false };
@@ -80,13 +80,10 @@ struct ArrayLifetimeProps
           downsampling_method.value_or(ZarrDownsamplingMethod_Mean);
 
         if (!storage_dimension_order.empty()) {
-            dimension_order_ptrs_.clear();
-            dimension_order_ptrs_.reserve(storage_dimension_order.size());
-            for (const auto& name : storage_dimension_order) {
-                dimension_order_ptrs_.push_back(name.c_str());
-            }
-            array_settings_.storage_dimension_order = dimension_order_ptrs_.data();
-            array_settings_.storage_dimension_order_size = dimension_order_ptrs_.size();
+            array_settings_.storage_dimension_order =
+              storage_dimension_order.data();
+        } else {
+            array_settings_.storage_dimension_order = nullptr;
         }
 
         return &array_settings_;
@@ -94,7 +91,6 @@ struct ArrayLifetimeProps
 
   private:
     ZarrArraySettings array_settings_{};
-    std::vector<const char*> dimension_order_ptrs_;
 };
 
 struct FieldOfViewLifetimeProps
@@ -657,8 +653,26 @@ class PyZarrArraySettings
             lt_props.scales[i] = dim.scale();
         }
 
-        // Pass through dimension order if specified
-        lt_props.storage_dimension_order = storage_dimension_order_;
+        // Convert dimension order names to indices
+        if (!storage_dimension_order_.empty()) {
+            lt_props.storage_dimension_order.reserve(storage_dimension_order_.size());
+            for (const auto& name : storage_dimension_order_) {
+                // Find this name in dims_ and get its index
+                bool found = false;
+                for (size_t i = 0; i < n_dims; ++i) {
+                    if (dims_[i].name() == name) {
+                        lt_props.storage_dimension_order.push_back(i);
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    throw py::value_error(
+                      "Dimension name '" + name +
+                      "' in storage_dimension_order not found in dimensions");
+                }
+            }
+        }
 
         return lt_props;
     }

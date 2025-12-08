@@ -71,7 +71,7 @@ class ArraySettings:
         This allows reordering according to the desired final layout (e.g.,
         `[TIME, CHANNEL, Z, Y, X]`, which is currently mandated by the OME-Zarr
         specification).
-        Notes:
+        Current limitations:
             - The first dimension *may not* be moved to a non-leading position.
             - The last two dimensions *may not* be moved out of the final two positions,
               but MAY be swapped with each other.
