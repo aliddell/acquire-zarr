@@ -31,6 +31,7 @@ struct ArrayLifetimeProps
     std::vector<uint32_t> array_sizes;
     std::vector<uint32_t> chunk_sizes;
     std::vector<uint32_t> shard_sizes;
+    std::vector<size_t> storage_dimension_order;
 
     ZarrCompressionSettings compression;
     bool has_compression{ false };
@@ -77,6 +78,13 @@ struct ArrayLifetimeProps
         array_settings_.multiscale = downsampling_method.has_value();
         array_settings_.downsampling_method =
           downsampling_method.value_or(ZarrDownsamplingMethod_Mean);
+
+        if (!storage_dimension_order.empty()) {
+            array_settings_.storage_dimension_order =
+              storage_dimension_order.data();
+        } else {
+            array_settings_.storage_dimension_order = nullptr;
+        }
 
         return &array_settings_;
     }
@@ -560,6 +568,50 @@ class PyZarrArraySettings
         downsampling_method_ = method;
     }
 
+    const std::vector<std::string>& storage_dimension_order() const
+    {
+        return storage_dimension_order_;
+    }
+    void set_storage_dimension_order(const std::vector<std::string>& order)
+    {
+        // Validate that dimension 0 is not transposed away
+        if (!order.empty() && !dims_.empty()) {
+            const std::string& first_dim_name = dims_[0].name();
+            if (order[0] != first_dim_name) {
+                throw py::type_error(
+                  "Transposing dimension 0 ('" + first_dim_name +
+                  "') away from position 0 is not currently supported. "
+                  "The first dimension must remain first in storage_dimension_order.");
+            }
+
+            // Validate that the last two acquisition dimensions remain in the
+            // last two positions (they can swap with each other, but cannot move elsewhere).
+            // This is required because frames arrive as 2D arrays with the shape of
+            // the last two acquisition dimensions.
+            const auto n = dims_.size();
+            if (order.size() == n && n >= 2) {
+                const auto& last_acq_name = dims_[n - 1].name();
+                const auto& second_last_acq_name = dims_[n - 2].name();
+
+                const bool last_two_preserved =
+                  (order[n - 1] == last_acq_name ||
+                   order[n - 1] == second_last_acq_name) &&
+                  (order[n - 2] == last_acq_name ||
+                   order[n - 2] == second_last_acq_name);
+
+                if (!last_two_preserved) {
+                    throw py::type_error(
+                      "The last two dimensions in acquisition order ('" +
+                      second_last_acq_name + "', '" + last_acq_name +
+                      "') must remain in the last two positions in storage_dimension_order. "
+                      "They may swap with each other, but cannot be reordered with "
+                      "other dimensions.");
+                }
+            }
+        }
+        storage_dimension_order_ = order;
+    }
+
     ArrayLifetimeProps to_lifetime_props() const
     {
         ArrayLifetimeProps lt_props{};
@@ -601,6 +653,27 @@ class PyZarrArraySettings
             lt_props.scales[i] = dim.scale();
         }
 
+        // Convert dimension order names to indices
+        if (!storage_dimension_order_.empty()) {
+            lt_props.storage_dimension_order.reserve(storage_dimension_order_.size());
+            for (const auto& name : storage_dimension_order_) {
+                // Find this name in dims_ and get its index
+                bool found = false;
+                for (size_t i = 0; i < n_dims; ++i) {
+                    if (dims_[i].name() == name) {
+                        lt_props.storage_dimension_order.push_back(i);
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    throw py::value_error(
+                      "Dimension name '" + name +
+                      "' in storage_dimension_order not found in dimensions");
+                }
+            }
+        }
+
         return lt_props;
     }
 
@@ -610,6 +683,7 @@ class PyZarrArraySettings
     std::vector<PyZarrDimensionProperties> dims_;
     ZarrDataType data_type_{ ZarrDataType_uint8 };
     std::optional<ZarrDownsamplingMethod> downsampling_method_{ std::nullopt };
+    std::vector<std::string> storage_dimension_order_;
 };
 
 class PyZarrFieldOfView
@@ -1422,7 +1496,8 @@ PYBIND11_MODULE(acquire_zarr, m)
                     std::optional<PyZarrCompressionSettings> compression,
                     std::optional<py::list> dimensions,
                     std::optional<py::object> data_type,
-                    std::optional<ZarrDownsamplingMethod> downsampling_method) {
+                    std::optional<ZarrDownsamplingMethod> downsampling_method,
+                    std::optional<py::list> storage_dimension_order) {
             PyZarrArraySettings settings;
 
             if (output_key) {
@@ -1460,6 +1535,14 @@ PYBIND11_MODULE(acquire_zarr, m)
             if (downsampling_method) {
                 settings.set_downsampling_method(*downsampling_method);
             }
+            if (storage_dimension_order) {
+                auto& order_list = *storage_dimension_order;
+                std::vector<std::string> order_vec(order_list.size());
+                for (auto i = 0; i < order_list.size(); ++i) {
+                    order_vec[i] = order_list[i].cast<std::string>();
+                }
+                settings.set_storage_dimension_order(order_vec);
+            }
 
             return settings;
         }),
@@ -1468,7 +1551,8 @@ PYBIND11_MODULE(acquire_zarr, m)
         py::arg("compression") = std::nullopt,
         py::arg("dimensions") = std::nullopt,
         py::arg("data_type") = std::nullopt,
-        py::arg("downsampling_method") = std::nullopt)
+        py::arg("downsampling_method") = std::nullopt,
+        py::arg("storage_dimension_order") = std::nullopt)
       .def("__repr__",
            [](const PyZarrArraySettings& self) {
                std::string repr =
@@ -1581,7 +1665,10 @@ PYBIND11_MODULE(acquire_zarr, m)
                 self.set_downsampling_method(
                   obj.cast<ZarrDownsamplingMethod>());
             }
-        });
+        })
+      .def_property("storage_dimension_order",
+                    &PyZarrArraySettings::storage_dimension_order,
+                    &PyZarrArraySettings::set_storage_dimension_order);
 
     py::class_<PyZarrFieldOfView>(m, "FieldOfView", py::dynamic_attr())
       .def(py::init([](std::optional<std::string> path,
