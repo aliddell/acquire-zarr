@@ -9,16 +9,16 @@
 
 zarr::Shard::Shard(ShardConfig&& config,
                    std::shared_ptr<ThreadPool> thread_pool)
-  : config_(std::move(config))
-  , thread_pool_(thread_pool)
-  , file_offset_(0)
-  , current_layer_(0)
+    : config_(std::move(config))
+      , thread_pool_(thread_pool)
+      , file_offset_(0)
+      , current_layer_(0)
 {
     EXPECT(config_.dims != nullptr, "ArrayDimensions pointer cannot be null");
     EXPECT(thread_pool_ != nullptr, "ThreadPool pointer cannot be null");
 
     const auto& chunk_indices =
-      config_.dims->chunk_indices_for_shard(config_.shard_grid_index);
+        config_.dims->chunk_indices_for_shard(config_.shard_grid_index);
 
     for (const auto& chunk_idx : chunk_indices) {
         chunks_.emplace(chunk_idx, std::vector<uint8_t>());
@@ -36,7 +36,7 @@ zarr::Shard::Shard(ShardConfig&& config,
     std::ranges::fill(extents_, std::numeric_limits<uint64_t>::max());
 
     chunks_per_layer_ =
-      (n_chunks_this_shard + layers_per_shard_ - 1) / layers_per_shard_;
+        (n_chunks_this_shard + layers_per_shard_ - 1) / layers_per_shard_;
 
     frames_per_layer_ = config_.dims->at(0).chunk_size_px;
     for (auto i = 1; i < config_.dims->ndims() - 2; ++i) {
@@ -105,7 +105,8 @@ zarr::Shard::write_frame(const std::span<uint8_t>& frame, uint64_t frame_id)
     // offset among the chunks in the lattice
     const uint32_t group_offset = dims->tile_group_offset(frame_id);
     std::vector<uint32_t> chunk_indices = dims->chunk_indices_for_shard_layer(
-      config_.shard_grid_index, current_layer_);
+        config_.shard_grid_index,
+        current_layer_);
 
     // offset within each chunk
     const size_t chunk_offset = dims->chunk_internal_offset(frame_id);
@@ -153,10 +154,10 @@ zarr::Shard::write_frame(const std::span<uint8_t>& frame, uint64_t frame_id)
                 const auto frame_col = tile_idx_x * tile_cols;
 
                 const auto region_width =
-                  std::min(frame_col + tile_cols, frame_cols) - frame_col;
+                    std::min(frame_col + tile_cols, frame_cols) - frame_col;
 
                 const auto region_start =
-                  bytes_per_px * (frame_row * frame_cols + frame_col);
+                    bytes_per_px * (frame_row * frame_cols + frame_col);
                 const auto nbytes = region_width * bytes_per_px;
 
                 // copy region
@@ -175,7 +176,9 @@ zarr::Shard::write_frame(const std::span<uint8_t>& frame, uint64_t frame_id)
                        " bytes per chunk: ",
                        bytes_per_chunk);
                 memcpy(
-                  chunk_start + chunk_pos, frame_ptr + region_start, nbytes);
+                    chunk_start + chunk_pos,
+                    frame_ptr + region_start,
+                    nbytes);
                 bytes_written_this_chunk += nbytes;
             }
             chunk_pos += bytes_per_row;
@@ -237,6 +240,7 @@ zarr::Shard::assert_frame_in_layer_(uint64_t frame_id) const
 bool
 zarr::Shard::close_current_layer_()
 {
+    // layer is locked by caller
     if (!compress_and_flush_data_(current_layer_)) {
         LOG_ERROR("Failed to flush chunks");
         return false;
@@ -256,21 +260,31 @@ zarr::Shard::close_current_layer_()
 bool
 zarr::Shard::compress_and_flush_data_(uint32_t layer)
 {
+    // layer is locked by caller
     return compress_chunks_(layer) && flush_chunks_(layer);
 }
 
 bool
 zarr::Shard::compress_chunks_(uint32_t layer)
 {
-    std::unique_lock lock(*mutexes_[layer]);
-
+    // layer is locked by caller
     const auto chunk_indices = config_.dims->chunk_indices_for_shard_layer(
-      config_.shard_grid_index, layer);
+        config_.shard_grid_index,
+        layer);
 
     if (!config_.compression_params) {
+        size_t offset = file_offset_;
         for (const auto& idx : chunk_indices) {
             compress_promises_.emplace(idx, std::promise<bool>());
             auto& promise = compress_promises_[idx];
+
+            const size_t bytes_of_chunk = chunks_[idx].size();
+            const uint32_t internal_idx =
+                config_.dims->shard_internal_index(idx);
+
+            offsets_[internal_idx] = offset;
+            extents_[internal_idx] = bytes_of_chunk;
+            offset += bytes_of_chunk;
 
             compress_futures_.emplace(idx, promise.get_future());
             promise.set_value(true);
@@ -286,48 +300,48 @@ zarr::Shard::compress_chunks_(uint32_t layer)
 
         size_t offset = file_offset_;
 
-        for (const auto& index : chunk_indices) {
-            std::vector<uint8_t>& chunk = chunks_[index];
+        for (const auto& idx : chunk_indices) {
+            std::vector<uint8_t>& chunk = chunks_[idx];
             const size_t bytes_of_chunk = chunk.size();
-            const uint32_t internal_index =
-              config_.dims->shard_internal_index(index);
+            const uint32_t internal_idx =
+                config_.dims->shard_internal_index(idx);
 
-            compress_promises_.emplace(index, std::promise<bool>());
-            compress_futures_.emplace(index,
-                                      compress_promises_[index].get_future());
+            compress_promises_.emplace(idx, std::promise<bool>());
+            compress_futures_.emplace(idx,
+                                      compress_promises_[idx].get_future());
 
             try {
                 int nbytes_compressed = bytes_of_chunk + BLOSC_MAX_OVERHEAD;
                 std::vector<uint8_t> compressed(nbytes_compressed);
 
                 nbytes_compressed = blosc_compress_ctx(params->clevel,
-                                                       params->shuffle,
-                                                       bytes_per_px,
-                                                       chunk.size(),
-                                                       chunk.data(),
-                                                       compressed.data(),
-                                                       compressed.size(),
-                                                       params->codec_id.c_str(),
-                                                       0,
-                                                       1);
+                    params->shuffle,
+                    bytes_per_px,
+                    chunk.size(),
+                    chunk.data(),
+                    compressed.data(),
+                    compressed.size(),
+                    params->codec_id.c_str(),
+                    0,
+                    1);
                 if (nbytes_compressed <= 0) {
                     err = "blosc_compress_ctx failed with code " +
                           std::to_string(nbytes_compressed) + " for chunk " +
-                          std::to_string(internal_index) + " of shard ";
+                          std::to_string(internal_idx) + " of shard ";
                     success = false;
-                    compress_promises_.at(index).set_value(false);
+                    compress_promises_.at(idx).set_value(false);
                 } else {
-                    offsets_[internal_index] = offset;
-                    extents_[internal_index] = compressed.size();
+                    offsets_[internal_idx] = offset;
+                    extents_[internal_idx] = compressed.size();
                     chunk.swap(compressed);
 
                     offset += nbytes_compressed;
-                    compress_promises_.at(index).set_value(true);
+                    compress_promises_.at(idx).set_value(true);
                 }
             } catch (const std::exception& exc) {
                 err = "Failed to compress: " + std::string(exc.what());
                 success = false;
-                compress_promises_.at(index).set_value(false);
+                compress_promises_.at(idx).set_value(false);
             }
         }
 
@@ -347,10 +361,10 @@ zarr::Shard::compress_chunks_(uint32_t layer)
 bool
 zarr::Shard::flush_chunks_(uint32_t layer)
 {
-    std::unique_lock lock(*mutexes_[layer]);
-
+    // layer is locked by caller
     const auto chunk_indices = config_.dims->chunk_indices_for_shard_layer(
-      config_.shard_grid_index, layer);
+        config_.shard_grid_index,
+        layer);
     const size_t bytes_per_chunk = config_.dims->bytes_per_chunk();
 
     bool flush_success = true;
@@ -361,47 +375,48 @@ zarr::Shard::flush_chunks_(uint32_t layer)
         flush_futures_.emplace(chunk_idx,
                                flush_promises_[chunk_idx].get_future());
         auto job =
-          [this, bytes_per_chunk, chunk_idx, layer, &chunk](std::string& err) {
-              bool success;
+            [this, bytes_per_chunk, chunk_idx, layer, &chunk
+            ](std::string& err) {
+            bool success;
 
-              try {
-                  compress_futures_[chunk_idx].wait();
-                  const bool compressed_successfully =
+            try {
+                compress_futures_[chunk_idx].wait();
+                const bool compressed_successfully =
                     compress_futures_[chunk_idx].get();
 
-                  compress_promises_.erase(chunk_idx);
-                  compress_futures_.erase(chunk_idx);
+                compress_promises_.erase(chunk_idx);
+                compress_futures_.erase(chunk_idx);
 
-                  // failed to compress
-                  if (compressed_successfully) {
-                      success = write_to_offset_(chunk, offsets_[chunk_idx]);
+                // failed to compress
+                if (compressed_successfully) {
+                    success = write_to_offset_(chunk, offsets_[chunk_idx]);
 
-                      if (success) {
-                          bytes_to_flush_[layer] = 0;
+                    if (success) {
+                        bytes_to_flush_[layer] = 0;
 
-                          // free up memory until next time we get to this layer
-                          if (layers_per_shard_ > 0) {
-                              chunk.clear();
-                          } else {
-                              chunk.resize(bytes_per_chunk);
-                              std::ranges::fill(chunk, 0);
-                          }
-                      }
-                  } else {
-                      err =
+                        // free up memory until next time we get to this layer
+                        if (layers_per_shard_ > 0) {
+                            chunk.clear();
+                        } else {
+                            chunk.resize(bytes_per_chunk);
+                            std::ranges::fill(chunk, 0);
+                        }
+                    }
+                } else {
+                    err =
                         "Failed to flush chunk: " + std::to_string(chunk_idx) +
                         ": compression failed";
-                      success = false;
-                  }
-              } catch (const std::exception& exc) {
-                  err = "Failed to flush chunk " + std::to_string(chunk_idx) +
-                        ": " + std::string(exc.what());
-                  success = false;
-              }
+                    success = false;
+                }
+            } catch (const std::exception& exc) {
+                err = "Failed to flush chunk " + std::to_string(chunk_idx) +
+                      ": " + std::string(exc.what());
+                success = false;
+            }
 
-              flush_promises_[chunk_idx].set_value(success);
-              return success;
-          };
+            flush_promises_[chunk_idx].set_value(success);
+            return success;
+        };
 
         if (thread_pool_->n_threads() == 1 || !thread_pool_->push_job(job)) {
             if (std::string err; !job(err)) {
