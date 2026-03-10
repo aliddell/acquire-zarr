@@ -438,7 +438,7 @@ class ZarrStream:
     def skip(self, n_bytes: int) -> None: ...
     def write_custom_metadata(
         self,
-        metadata: str,
+        metadata: str | dict,
         *,
         array_key: str | None = None,
         metadata_key: str | None = None,

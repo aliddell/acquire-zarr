@@ -571,17 +571,22 @@ def test_write_custom_metadata(
     store_path: Path,
     array_key: str | None,
     metadata_key: str | None,
-    multiscale: bool
+    multiscale: bool,
 ):
     settings.store_path = str(store_path / "test.zarr")
-    settings.arrays[0].output_key = array_key
+
+    if array_key is not None:
+        settings.arrays[0].output_key = array_key
     if multiscale:
         settings.arrays[0].downsampling_method = DownsamplingMethod.MEAN
 
     stream = ZarrStream(settings)
     assert stream
 
-    assert stream.write_custom_metadata(json.dumps({"foo": "bar"}), array_key=array_key, metadata_key=metadata_key)
+    metadata_dict = {"foo": "bar"}
+    assert stream.write_custom_metadata(
+        metadata_dict, array_key=array_key, metadata_key=metadata_key
+    )
 
     stream.close()
 
@@ -591,7 +596,6 @@ def test_write_custom_metadata(
     else:
         metadata_path = Path(settings.store_path) / "zarr.json"
 
-    
     assert metadata_path.is_file()
     with open(metadata_path, "r") as fh:
         data = json.load(fh)
@@ -603,8 +607,10 @@ def test_write_custom_metadata(
     if metadata_key is not None and not len(metadata_key) == 0:
         assert metadata_key in container
         container = container[metadata_key]
+        assert len(container) == 1
+    else:
+        assert len(container) == 2 if multiscale else 1
 
-    assert len(container) == 1
     assert container.get("foo") == "bar"
 
 
@@ -1814,4 +1820,3 @@ def test_append_throws_on_overflow(
         stream.append(one_more_byte)
 
         assert e
-

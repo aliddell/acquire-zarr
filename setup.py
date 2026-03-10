@@ -49,13 +49,14 @@ class CMakeBuild(build_ext):
         subprocess.check_call(["cmake", ext.sourcedir] + cmake_args, cwd=build_dir)
         subprocess.check_call(["cmake", "--build", "."] + build_args, cwd=build_dir)
 
-        if self.compiler.compiler_type == "msvc":
-            built_ext = str(Path(build_dir) / "python" / cfg  / "__init__*.pyd")
-        else:
-            built_ext = str(Path(build_dir) / "python"  / "__init__*.so")
-        matching_files = glob.glob(built_ext)
-        if not matching_files:
-            raise RuntimeError(f"Could not find any files matching {built_ext}")
+        py_build_dir = Path(build_dir) / "python"
+        patterns = ("__init__*.pyd", "__init__*.so")
+
+        matching_files = []
+        for pattern in patterns:
+            matching_files.extend(py_build_dir.glob(f"**/{pattern}"))
+            if matching_files:
+                break
 
         # Move the built extension to the correct location
         dst = self.get_ext_fullpath(ext.name)
