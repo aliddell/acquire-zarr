@@ -203,6 +203,7 @@ test_nonexistent_array_key()
 
     ZarrStream_destroy(stream);
     return true;
+}
 } // namespace
 
 int
