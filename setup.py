@@ -22,12 +22,19 @@ class CMakeBuild(build_ext):
 
         cfg = "Debug" if self.debug else "Release"
 
+        vcpkg_root = os.environ.get("VCPKG_ROOT")
+        if not vcpkg_root:
+            raise RuntimeError("VCPKG_ROOT environment variable is not set")
+
         cmake_args = [
-            "--preset=default",
+            f"-DCMAKE_TOOLCHAIN_FILE={vcpkg_root}/scripts/buildsystems/vcpkg.cmake",
             f"-DCMAKE_BUILD_TYPE={cfg}",
             "-DBUILD_PYTHON=ON",
             "-DBUILD_TESTING=OFF",
         ]
+
+        extra_args = os.environ.get("CMAKE_ARGS", "").split()
+        cmake_args += [arg for arg in extra_args if arg]  # Filter out empty strings
 
         if self.compiler.compiler_type == "msvc":
             cmake_args.append("-DVCPKG_TARGET_TRIPLET=x64-windows-static")
