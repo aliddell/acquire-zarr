@@ -1251,7 +1251,9 @@ class PyZarrStream
         }
     }
 
-    bool write_custom_metadata(py::str custom_metadata, bool overwrite)
+    bool write_custom_metadata(py::str metadata,
+                               const std::optional<std::string>& array_key,
+                               const std::optional<std::string>& metadata_key)
     {
         if (!is_active()) {
             PyErr_SetString(PyExc_RuntimeError,
@@ -1259,10 +1261,17 @@ class PyZarrStream
             throw py::error_already_set();
         }
 
+        const std::string metadata_str = metadata.cast<std::string>();
+        const char* array_cstr =
+          array_key.has_value() ? array_key->c_str() : nullptr;
+        const char* meta_cstr =
+          array_key.has_value() ? metadata_key->c_str() : nullptr;
+
         auto status = ZarrStream_write_custom_metadata(
           stream_.get(),
-          custom_metadata.cast<std::string>().c_str(),
-          overwrite);
+          array_cstr,
+          meta_cstr,
+          metadata.cast<std::string>().c_str());
 
         if (status == ZarrStatusCode_WillNotOverwrite) {
             return false; // Metadata already exists and overwrite is false
@@ -2264,8 +2273,9 @@ PYBIND11_MODULE(acquire_zarr, m)
            py::arg("key") = std::nullopt)
       .def("write_custom_metadata",
            &PyZarrStream::write_custom_metadata,
-           py::arg("custom_metadata"),
-           py::arg("overwrite"))
+           py::arg("metadata"),
+           py::arg("array_key") = std::nullopt,
+           py::arg("metadata_key") = std::nullopt)
       .def("is_active", &PyZarrStream::is_active)
       .def("get_current_memory_usage",
            &PyZarrStream::get_current_memory_usage,
