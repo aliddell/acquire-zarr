@@ -111,7 +111,6 @@ jobs:
           - "3.10"
           - "3.11"
           - "3.12"
-          - "3.13.3"
           - "3.13"
           - "3.14"
         include:
@@ -125,16 +124,22 @@ jobs:
             arch: "x86_64"
           - platform: "ubuntu-22.04-arm"
             arch: "aarch64"
+          - python: "3.10"
+            cibw_build: cp310
+            py_version: "3.10"
           - python: "3.11"
             cibw_build: cp311
+            py_version: "3.11"
           - python: "3.12"
             cibw_build: cp312
-          - python: "3.13.3"
-            cibw_build: cp313
+            py_version: "3.12"
           - python: "3.13"
             cibw_build: cp313
+            py_version: "3.13"
           - python: "3.14"
             cibw_build: cp314
+            py_version: "3.14"
+
 
     runs-on: ${{ matrix.platform }}
 
@@ -156,6 +161,7 @@ jobs:
           python-version: ${{ matrix.python }}
 
       - name: Install vcpkg
+        if: ${{ !startsWith(matrix.platform, 'ubuntu') }} # vcpkg will be installed in the manylinux image for Ubuntu builds
         run: |
           git clone https://github.com/microsoft/vcpkg.git -b 2025.03.19
           cd vcpkg && ./bootstrap-vcpkg.sh
@@ -178,7 +184,7 @@ jobs:
 
       - name: Build (manylinux)
         if: startsWith(matrix.platform, 'ubuntu')
-        uses: pypa/cibuildwheel@v3.0.1
+        uses: pypa/cibuildwheel@v3.3.1
         env:
           CIBW_BUILD: "${{ matrix.cibw_build }}-*"
           CIBW_SKIP: "*-musllinux*"  # Skip musllinux builds
@@ -197,8 +203,8 @@ jobs:
             CC=/opt/rh/gcc-toolset-11/root/usr/bin/gcc
             CXX=/opt/rh/gcc-toolset-11/root/usr/bin/g++
             Python3_EXECUTABLE="/opt/python/${{ matrix.cibw_build }}-${{ matrix.cibw_build }}/bin/python"
-            Python3_INCLUDE_DIR="/opt/python/${{ matrix.cibw_build }}-${{ matrix.cibw_build }}/include/python3.${{ matrix.cibw_build }}"
-            Python3_LIBRARY="/opt/python/${{ matrix.cibw_build }}-${{ matrix.cibw_build }}/lib/libpython3.${{ matrix.cibw_build }}.a"
+            Python3_INCLUDE_DIR="/opt/python/${{ matrix.cibw_build }}-${{ matrix.cibw_build }}/include/python${{ matrix.python }}"
+            Python3_LIBRARY="/opt/python/${{ matrix.cibw_build }}-${{ matrix.cibw_build }}/lib/libpython${{ matrix.python }}.a"
         with:
           output-dir: dist
 
