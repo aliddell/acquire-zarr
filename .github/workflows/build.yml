@@ -5,97 +5,94 @@ on:
     branches:
       - "main"
       - "prep-for-*"
-  pull_request: # Temporary (TODO: remove once verified working for all Python versions)
-    branches:
-      - "main"
 
 jobs:
-  # build:
-  #   name: Build on ${{ matrix.platform }} with ${{ matrix.build_type }} configuration
-  #   strategy:
-  #     matrix:
-  #       build_type:
-  #         - "Debug"
-  #         - "Release"
-  #       platform:
-  #         - "windows-latest"
-  #         - "ubuntu-latest"
-  #         - "ubuntu-24.04-arm"
-  #         - "macos-latest" # arm
-  #         - "macos-15-intel" # x86_64
-  #       include:
-  #         - platform: "windows-latest"
-  #           vcpkg_triplet: "x64-windows-static"
-  #           platform_name: "windows-x86_64"
-  #         - platform: "ubuntu-latest"
-  #           vcpkg_triplet: "x64-linux"
-  #           platform_name: "linux-x86_64"
-  #         - platform: "ubuntu-24.04-arm"
-  #           vcpkg_triplet: "arm64-linux"
-  #           platform_name: "linux-aarch64"
-  #         - platform: "macos-latest"
-  #           vcpkg_triplet: "arm64-osx"
-  #           platform_name: "macos-arm64"
-  #         - platform: "macos-15-intel"
-  #           vcpkg_triplet: "x64-osx"
-  #           platform_name: "macos-x86_64"
+  build:
+    name: Build on ${{ matrix.platform }} with ${{ matrix.build_type }} configuration
+    strategy:
+      matrix:
+        build_type:
+          - "Debug"
+          - "Release"
+        platform:
+          - "windows-latest"
+          - "ubuntu-latest"
+          - "ubuntu-24.04-arm"
+          - "macos-latest" # arm
+          - "macos-15-intel" # x86_64
+        include:
+          - platform: "windows-latest"
+            vcpkg_triplet: "x64-windows-static"
+            platform_name: "windows-x86_64"
+          - platform: "ubuntu-latest"
+            vcpkg_triplet: "x64-linux"
+            platform_name: "linux-x86_64"
+          - platform: "ubuntu-24.04-arm"
+            vcpkg_triplet: "arm64-linux"
+            platform_name: "linux-aarch64"
+          - platform: "macos-latest"
+            vcpkg_triplet: "arm64-osx"
+            platform_name: "macos-arm64"
+          - platform: "macos-15-intel"
+            vcpkg_triplet: "x64-osx"
+            platform_name: "macos-x86_64"
 
-  #   runs-on: ${{ matrix.platform }}
+    runs-on: ${{ matrix.platform }}
 
-  #   permissions:
-  #     actions: write
+    permissions:
+      actions: write
 
-  #   concurrency:
-  #     group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.platform }}-${{ matrix.build_type }}
-  #     cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.platform }}-${{ matrix.build_type }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #       with:
-  #         submodules: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
 
-  #     - name: Install CMake 3.31
-  #       if: matrix.platform != 'ubuntu-24.04-arm'
-  #       uses: jwlawson/actions-setup-cmake@v2
-  #       with:
-  #         cmake-version: "3.31.x"
+      - name: Install CMake 3.31
+        if: matrix.platform != 'ubuntu-24.04-arm'
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: "3.31.x"
 
-  #     - name: Install CMake 3.31 for ARM
-  #       if: matrix.platform == 'ubuntu-24.04-arm'
-  #       run: |
-  #         wget https://github.com/Kitware/CMake/releases/download/v3.31.8/cmake-3.31.8-linux-aarch64.tar.gz
-  #         tar -xzf cmake-3.31.8-linux-aarch64.tar.gz
-  #         sudo mv cmake-3.31.8-linux-aarch64 /opt/cmake
-  #         echo "/opt/cmake/bin" >> $GITHUB_PATH
+      - name: Install CMake 3.31 for ARM
+        if: matrix.platform == 'ubuntu-24.04-arm'
+        run: |
+          wget https://github.com/Kitware/CMake/releases/download/v3.31.8/cmake-3.31.8-linux-aarch64.tar.gz
+          tar -xzf cmake-3.31.8-linux-aarch64.tar.gz
+          sudo mv cmake-3.31.8-linux-aarch64 /opt/cmake
+          echo "/opt/cmake/bin" >> $GITHUB_PATH
 
-  #     - name: Install vcpkg
-  #       run: |
-  #         git clone https://github.com/microsoft/vcpkg.git -b 2025.03.19
-  #         cd vcpkg && ./bootstrap-vcpkg.sh
-  #         echo "VCPKG_ROOT=${{github.workspace}}/vcpkg" >> $GITHUB_ENV
-  #         echo "${{github.workspace}}/vcpkg" >> $GITHUB_PATH
-  #         ./vcpkg integrate install
-  #       shell: bash
+      - name: Install vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git -b 2025.03.19
+          cd vcpkg && ./bootstrap-vcpkg.sh
+          echo "VCPKG_ROOT=${{github.workspace}}/vcpkg" >> $GITHUB_ENV
+          echo "${{github.workspace}}/vcpkg" >> $GITHUB_PATH
+          ./vcpkg integrate install
+        shell: bash
 
-  #     - name: Install OpenMP
-  #       if: startsWith(matrix.platform, 'macos')
-  #       run: |
-  #         brew install libomp
+      - name: Install OpenMP
+        if: startsWith(matrix.platform, 'macos')
+        run: |
+          brew install libomp
 
-  #     - name: CMake
-  #       run: |
-  #         cmake --preset=default -DVCPKG_TARGET_TRIPLET=${{matrix.vcpkg_triplet}}
-  #         cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{matrix.build_type}}
+      - name: CMake
+        run: |
+          cmake --preset=default -DVCPKG_TARGET_TRIPLET=${{matrix.vcpkg_triplet}}
+          cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{matrix.build_type}}
 
-  #     - name: Build
-  #       run: |
-  #         cmake --build ${{github.workspace}}/build --config ${{matrix.build_type}}
-  #         cpack --config ${{github.workspace}}/build/CPackConfig.cmake -C ${{matrix.build_type}} -G ZIP
+      - name: Build
+        run: |
+          cmake --build ${{github.workspace}}/build --config ${{matrix.build_type}}
+          cpack --config ${{github.workspace}}/build/CPackConfig.cmake -C ${{matrix.build_type}} -G ZIP
 
-  #     - uses: actions/upload-artifact@v4
-  #       with:
-  #         name: ${{ matrix.platform_name }} ${{ matrix.build_type}} binaries
-  #         path: ${{github.workspace}}/*.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform_name }} ${{ matrix.build_type}} binaries
+          path: ${{github.workspace}}/*.zip
 
   build-wheel:
     name: Build Python ${{ matrix.python }} wheel on ${{ matrix.platform }}
@@ -125,20 +122,15 @@ jobs:
           - platform: "ubuntu-22.04-arm"
             arch: "aarch64"
           - python: "3.10"
-            cibw_build: cp310
-            py_version: "3.10"
+            cp_ver: cp310
           - python: "3.11"
-            cibw_build: cp311
-            py_version: "3.11"
+            cp_ver: cp311
           - python: "3.12"
-            cibw_build: cp312
-            py_version: "3.12"
+            cp_ver: cp312
           - python: "3.13"
-            cibw_build: cp313
-            py_version: "3.13"
+            cp_ver: cp313
           - python: "3.14"
-            cibw_build: cp314
-            py_version: "3.14"
+            cp_ver: cp314
 
 
     runs-on: ${{ matrix.platform }}
@@ -186,7 +178,7 @@ jobs:
         if: startsWith(matrix.platform, 'ubuntu')
         uses: pypa/cibuildwheel@v3.3.1
         env:
-          CIBW_BUILD: "${{ matrix.cibw_build }}-*"
+          CIBW_BUILD: "${{ matrix.cp_ver }}-*"
           CIBW_SKIP: "*-musllinux*"  # Skip musllinux builds
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
           CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
@@ -202,9 +194,9 @@ jobs:
             PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
             CC=/opt/rh/gcc-toolset-11/root/usr/bin/gcc
             CXX=/opt/rh/gcc-toolset-11/root/usr/bin/g++
-            Python3_EXECUTABLE="/opt/python/${{ matrix.cibw_build }}-${{ matrix.cibw_build }}/bin/python"
-            Python3_INCLUDE_DIR="/opt/python/${{ matrix.cibw_build }}-${{ matrix.cibw_build }}/include/python${{ matrix.python }}"
-            Python3_LIBRARY="/opt/python/${{ matrix.cibw_build }}-${{ matrix.cibw_build }}/lib/libpython${{ matrix.python }}.a"
+            Python3_EXECUTABLE="/opt/python/${{ matrix.cp_ver }}-${{ matrix.cp_ver }}/bin/python"
+            Python3_INCLUDE_DIR="/opt/python/${{ matrix.cp_ver }}-${{ matrix.cp_ver }}/include/python${{ matrix.python }}"
+            Python3_LIBRARY="/opt/python/${{ matrix.cp_ver }}-${{ matrix.cp_ver }}/lib/libpython${{ matrix.python }}.a"
         with:
           output-dir: dist
 
