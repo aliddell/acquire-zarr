@@ -2,7 +2,7 @@
 requires = [
     "cmake<4.0.0",
     "ninja",
-    "pybind11[global]",
+    "pybind11[global]>=2.13",
     "setuptools>=42",
     "wheel",
 ]
@@ -35,7 +35,7 @@ testing = [
 ]
 
 [tool.black]
-target-version = ['py39', 'py310', 'py311', 'py312', 'py313']
+target-version = ['py310', 'py311', 'py312', 'py313', 'py314']
 line-length = 79
 
 [tool.isort]

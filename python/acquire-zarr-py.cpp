@@ -449,7 +449,11 @@ class PyZarrCompressionSettings
     void set_codec(ZarrCompressionCodec codec) { codec_ = codec; }
 
     uint8_t level() const { return level_; }
-    void set_level(uint8_t level) { level_ = level; }
+    void set_level(uint8_t level)
+    {
+        std::cout << "yo" << std::endl;
+        // level_ = level;
+    }
 
     uint8_t shuffle() const { return shuffle_; }
     void set_shuffle(uint8_t shuffle) { shuffle_ = shuffle; }
@@ -1415,7 +1419,7 @@ PYBIND11_MODULE(acquire_zarr, m)
       .value(log_level_to_str(ZarrLogLevel_Error), ZarrLogLevel_Error)
       .value(log_level_to_str(ZarrLogLevel_None), ZarrLogLevel_None);
 
-    py::class_<PyZarrS3Settings>(m, "S3Settings", py::dynamic_attr())
+    py::class_<PyZarrS3Settings>(m, "S3Settings")
       .def(py::init([](std::optional<std::string> endpoint,
                        std::optional<std::string> bucket_name,
                        std::optional<std::string> region) {
@@ -1447,33 +1451,32 @@ PYBIND11_MODULE(acquire_zarr, m)
       .def_property(
         "region", &PyZarrS3Settings::region, &PyZarrS3Settings::set_region);
 
-    py::class_<PyZarrCompressionSettings>(
-      m, "CompressionSettings", py::dynamic_attr())
-      .def(py::init([](std::optional<ZarrCompressor> compressor,
-                       std::optional<ZarrCompressionCodec> codec,
-                       std::optional<int> level,
-                       std::optional<int> shuffle) {
-               PyZarrCompressionSettings settings;
+    py::class_<PyZarrCompressionSettings>(m, "CompressionSettings")
+      .def(py::init([](py::object compressor,
+                       py::object codec,
+                       py::object level,
+                       py::object shuffle) {
+               PyZarrCompressionSettings settings{};
 
-               if (compressor) {
-                   settings.set_compressor(*compressor);
+               if (!compressor.is_none()) {
+                   settings.set_compressor(compressor.cast<ZarrCompressor>());
                }
-               if (codec) {
-                   settings.set_codec(*codec);
+               if (!codec.is_none()) {
+                   settings.set_codec(codec.cast<ZarrCompressionCodec>());
                }
-               if (level) {
-                   settings.set_level(*level);
+               if (!level.is_none()) {
+                   settings.set_level(level.cast<int>());
                }
-               if (shuffle) {
-                   settings.set_shuffle(*shuffle);
+               if (!shuffle.is_none()) {
+                   settings.set_shuffle(shuffle.cast<int>());
                }
                return settings;
            }),
-           py::kw_only(),
-           py::arg("compressor") = std::nullopt,
-           py::arg("codec") = std::nullopt,
-           py::arg("level") = std::nullopt,
-           py::arg("shuffle") = std::nullopt)
+           //    py::kw_only(),
+           py::arg("compressor") = py::none(),
+           py::arg("codec") = py::none(),
+           py::arg("level") = py::none(),
+           py::arg("shuffle") = py::none())
       .def("__repr__",
            [](const PyZarrCompressionSettings& self) { return self.repr(); })
       .def_property("compressor",
@@ -1489,7 +1492,7 @@ PYBIND11_MODULE(acquire_zarr, m)
                     &PyZarrCompressionSettings::shuffle,
                     &PyZarrCompressionSettings::set_shuffle);
 
-    py::class_<PyZarrDimensionProperties>(m, "Dimension", py::dynamic_attr())
+    py::class_<PyZarrDimensionProperties>(m, "Dimension")
       .def(py::init([](std::optional<std::string> name,
                        std::optional<ZarrDimensionType> kind,
                        std::optional<std::string> unit,
@@ -1555,7 +1558,7 @@ PYBIND11_MODULE(acquire_zarr, m)
                     &PyZarrDimensionProperties::shard_size_chunks,
                     &PyZarrDimensionProperties::set_shard_size_chunks);
 
-    py::class_<PyZarrArraySettings>(m, "ArraySettings", py::dynamic_attr())
+    py::class_<PyZarrArraySettings>(m, "ArraySettings")
       .def(
         py::init([](std::optional<std::string> output_key,
                     std::optional<PyZarrCompressionSettings> compression,
@@ -1735,7 +1738,7 @@ PYBIND11_MODULE(acquire_zarr, m)
                     &PyZarrArraySettings::storage_dimension_order,
                     &PyZarrArraySettings::set_storage_dimension_order);
 
-    py::class_<PyZarrFieldOfView>(m, "FieldOfView", py::dynamic_attr())
+    py::class_<PyZarrFieldOfView>(m, "FieldOfView")
       .def(py::init([](std::optional<std::string> path,
                        std::optional<uint32_t> acquisition_id,
                        std::optional<PyZarrArraySettings> array_settings) {
@@ -1790,7 +1793,7 @@ PYBIND11_MODULE(acquire_zarr, m)
                     &PyZarrFieldOfView::array_settings,
                     &PyZarrFieldOfView::set_array_settings);
 
-    py::class_<PyZarrWell>(m, "Well", py::dynamic_attr())
+    py::class_<PyZarrWell>(m, "Well")
       .def(py::init([](std::optional<std::string> row_name,
                        std::optional<std::string> column_name,
                        std::optional<py::list> images) {
@@ -1847,7 +1850,7 @@ PYBIND11_MODULE(acquire_zarr, m)
             }
         });
 
-    py::class_<PyZarrAcquisition>(m, "Acquisition", py::dynamic_attr())
+    py::class_<PyZarrAcquisition>(m, "Acquisition")
       .def(py::init([](std::optional<uint32_t> id,
                        std::optional<std::string> name,
                        std::optional<std::string> description,
@@ -1955,7 +1958,7 @@ PYBIND11_MODULE(acquire_zarr, m)
             }
         });
 
-    py::class_<PyZarrPlate>(m, "Plate", py::dynamic_attr())
+    py::class_<PyZarrPlate>(m, "Plate")
       .def(py::init([](std::optional<std::string> path,
                        std::optional<std::string> name,
                        std::optional<py::list> row_names,
@@ -2091,7 +2094,7 @@ PYBIND11_MODULE(acquire_zarr, m)
             }
         });
 
-    py::class_<PyZarrStreamSettings>(m, "StreamSettings", py::dynamic_attr())
+    py::class_<PyZarrStreamSettings>(m, "StreamSettings")
       .def(py::init([](std::optional<std::string> store_path,
                        std::optional<PyZarrS3Settings> s3,
                        std::optional<ZarrVersion> version,
