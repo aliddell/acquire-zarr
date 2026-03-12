@@ -105,11 +105,11 @@ jobs:
           - "ubuntu-22.04"
           - "ubuntu-22.04-arm"
         python:
-          - "3.9"
           - "3.10"
           - "3.11"
           - "3.12"
           - "3.13"
+          - "3.14"
         include:
           - platform: "windows-latest"
             arch: "x86_64"
@@ -202,7 +202,7 @@ jobs:
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.platform }} ${{ matrix.python }} wheel
+          name: ${{matrix.platform}} ${{matrix.arch}} wheel (Python ${{ matrix.python }})
           path: ${{ github.workspace }}/dist
 
   release:
@@ -229,8 +229,8 @@ jobs:
       - name: Collect wheels
         run: |
           mkdir -p dist
-          mv ${{steps.download.outputs.download-path}}/*/*.whl dist
-          find ${{steps.download.outputs.download-path}}/ -type f -name *.tar.gz -exec mv {} dist \; -quit
+          mv --backup=numbered ${{steps.download.outputs.download-path}}/*/*.whl dist
+          find ${{steps.download.outputs.download-path}}/ -type f -name *.tar.gz -exec mv --backup=numbered {} dist \; -quit
 
       - name: Tagged release
         if: github.ref_name != 'nightly'
