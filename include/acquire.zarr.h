@@ -298,8 +298,8 @@ extern "C"
      * metadata will be written to the root zarr.json.
      * @param metadata_key Key under 'attributes' to write the metadata to. If
      * metadata_key is empty or NULL, metadata will be written directly under
-     * 'attributes'. Note: the 'ome' key and any children are disallowed.
-     * Passing 'ome' or a string beginning with 'ome/' will return an error.
+     * 'attributes'. Note: the 'ome' key is disallowed. Passing 'ome' will
+     * return an error.
      * @param metadata JSON-formatted metadata to be written to the dataset.
      * @return ZarrStatusCode_Success on success, or an error code on failure.
      */

@@ -121,6 +121,7 @@ class ArrayBase
 
     // JSON metadata
     const std::string metadata_path_{ "zarr.json" };
+    std::mutex metadata_mutex_;
     std::unordered_map<std::string, nlohmann::json> custom_metadata_;
     std::unique_ptr<Sink> metadata_sink_;
 

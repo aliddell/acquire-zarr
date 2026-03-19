@@ -32,23 +32,25 @@ zarr::ArrayBase::write_custom_metadata(const std::string& key,
         // keys
         for (const auto& reserved_key : reserved_keys) {
             if (metadata.contains(reserved_key)) {
-                LOG_ERROR("Key '", key, "' is reserved and cannot be used");
+                LOG_ERROR(
+                  "Key '", reserved_key, "' is reserved and cannot be used");
                 return false;
             }
         }
 
-        for (const auto& [key, value] : metadata.items()) {
-            custom_metadata_[key] = value;
+        std::unique_lock lock(metadata_mutex_);
+        for (const auto& [k, value] : metadata.items()) {
+            custom_metadata_[k] = value;
         }
     } else {
-        if (const auto it =
-              std::find(reserved_keys.begin(), reserved_keys.end(), key);
+        if (const auto it = std::ranges::find(reserved_keys, key);
             it != reserved_keys.end()) {
             LOG_ERROR("Key '", key, "' is reserved and cannot be used.");
             return false;
         }
 
         // store custom metadata in memory until we write it out in close()
+        std::unique_lock lock(metadata_mutex_);
         custom_metadata_[key] = metadata;
     }
 

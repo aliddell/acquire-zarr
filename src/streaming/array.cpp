@@ -217,12 +217,17 @@ zarr::Array::make_metadata_(nlohmann::json& metadata)
       },
     });
     meta_tmp["fill_value"] = 0;
-    meta_tmp["attributes"] = json::object();
 
-    if (!custom_metadata_.empty()) {
-        auto& attributes = meta_tmp["attributes"];
-        for (const auto& [key, value] : custom_metadata_) {
-            attributes[key] = value;
+    meta_tmp["attributes"] = json::object();
+    auto& attributes = meta_tmp["attributes"];
+
+    // write custom metadata, if any
+    {
+        std::unique_lock lock(metadata_mutex_);
+        if (!custom_metadata_.empty()) {
+            for (const auto& [key, value] : custom_metadata_) {
+                attributes[key] = value;
+            }
         }
     }
 

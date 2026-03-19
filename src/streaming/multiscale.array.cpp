@@ -86,15 +86,20 @@ zarr::MultiscaleArray::make_metadata_(nlohmann::json& metadata)
         { "attributes", nlohmann::json::object() },
     };
 
-    if (!custom_metadata_.empty()) {
-        auto& attributes = meta_tmp["attributes"];
-        for (const auto& [key, value] : custom_metadata_) {
-            attributes[key] = value;
+    auto& attributes = meta_tmp["attributes"];
+
+    // write custom metadata, if any
+    {
+        std::unique_lock lock(metadata_mutex_);
+        if (!custom_metadata_.empty()) {
+            for (const auto& [key, value] : custom_metadata_) {
+                attributes[key] = value;
+            }
         }
     }
 
     if (!arrays_.empty()) {
-        meta_tmp["attributes"]["ome"] = get_ome_metadata_();
+        attributes["ome"] = get_ome_metadata_();
     }
 
     metadata = std::move(meta_tmp);

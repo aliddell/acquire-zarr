@@ -1280,9 +1280,7 @@ class PyZarrStream
         auto status = ZarrStream_write_custom_metadata(
           stream_.get(), array_cstr, meta_cstr, metadata_str.c_str());
 
-        if (status == ZarrStatusCode_WillNotOverwrite) {
-            return false; // Metadata already exists and overwrite is false
-        } else if (status != ZarrStatusCode_Success) {
+        if (status != ZarrStatusCode_Success) {
             std::string err = "Failed to write custom metadata: " +
                               std::string(Zarr_get_status_message(status));
             PyErr_SetString(PyExc_RuntimeError, err.c_str());
