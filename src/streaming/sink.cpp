@@ -47,7 +47,8 @@ zarr::finalize_sink(std::unique_ptr<zarr::Sink>&& sink)
 std::vector<std::string>
 zarr::construct_data_paths(std::string_view base_path,
                            const ArrayDimensions& dimensions,
-                           const DimensionPartsFun& parts_along_dimension)
+                           const DimensionPartsFun& parts_along_dimension,
+                           bool create_on_fs)
 {
     std::queue<std::string> paths_queue;
     paths_queue.emplace(base_path);
@@ -60,14 +61,18 @@ zarr::construct_data_paths(std::string_view base_path,
         const auto n_parts = parts_along_dimension(dim);
         CHECK(n_parts);
 
-        auto n_paths = paths_queue.size();
+        const auto n_paths = paths_queue.size();
         for (auto j = 0; j < n_paths; ++j) {
             const auto path = paths_queue.front();
             paths_queue.pop();
 
             for (auto k = 0; k < n_parts; ++k) {
                 const auto kstr = std::to_string(k);
-                paths_queue.push(path + (path.empty() ? kstr : "/" + kstr));
+                const auto new_path = path + (path.empty() ? kstr : "/" + kstr);
+                if (create_on_fs) {
+                    fs::create_directories(new_path);
+                }
+                paths_queue.push(new_path);
             }
         }
     }
@@ -91,17 +96,6 @@ zarr::construct_data_paths(std::string_view base_path,
     }
 
     return paths_out;
-}
-
-std::vector<std::string>
-zarr::get_parent_paths(const std::vector<std::string>& file_paths)
-{
-    std::unordered_set<std::string> unique_paths;
-    for (const auto& file_path : file_paths) {
-        unique_paths.emplace(fs::path(file_path).parent_path().string());
-    }
-
-    return { unique_paths.begin(), unique_paths.end() };
 }
 
 bool

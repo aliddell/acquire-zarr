@@ -52,21 +52,15 @@ finalize_sink(std::unique_ptr<Sink>&& sink);
  * @param dimensions The dimensions of the dataset.
  * @param parts_along_dimension Function to determine the number of parts along
  * a dimension.
+ * @param create_on_fs Create on intermediate directories on the filesystem if
+ * true.
  * @return A vector of paths for the data sinks.
  */
 std::vector<std::string>
 construct_data_paths(std::string_view base_path,
                      const ArrayDimensions& dimensions,
-                     const DimensionPartsFun& parts_along_dimension);
-
-/**
- * @brief Get unique paths to the parent directories of each file in @p
- * file_paths.
- * @param file_paths Collection of paths to files.
- * @return Collection of unique parent directories.
- */
-std::vector<std::string>
-get_parent_paths(const std::vector<std::string>& file_paths);
+                     const DimensionPartsFun& parts_along_dimension,
+                     bool create_on_fs);
 
 /**
  * @brief Parallel create directories for a collection of paths.
