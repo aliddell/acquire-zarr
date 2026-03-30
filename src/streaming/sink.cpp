@@ -26,101 +26,6 @@ bucket_exists(std::string_view bucket_name,
 
     return bucket_exists;
 }
-
-bool
-make_file_sinks(std::vector<std::string>& file_paths,
-                std::shared_ptr<zarr::ThreadPool> thread_pool,
-                std::shared_ptr<zarr::FileHandlePool> file_handle_pool,
-                std::vector<std::unique_ptr<zarr::Sink>>& sinks)
-{
-    if (file_paths.empty()) {
-        return true;
-    }
-
-    const auto parents = zarr::get_parent_paths(file_paths);
-    if (!zarr::make_dirs(parents, thread_pool)) {
-        LOG_ERROR("Failed to make parent directories");
-        return false;
-    }
-
-    std::atomic<char> all_successful = 1;
-
-    const auto n_files = file_paths.size();
-    sinks.resize(n_files);
-    std::fill(sinks.begin(), sinks.end(), nullptr);
-    std::vector<std::future<void>> futures;
-
-    for (auto i = 0; i < n_files; ++i) {
-        const auto filename = file_paths[i];
-        std::unique_ptr<zarr::Sink>* psink = sinks.data() + i;
-
-        auto promise = std::make_shared<std::promise<void>>();
-        futures.emplace_back(promise->get_future());
-
-        auto job =
-          [filename, file_handle_pool, psink, promise, &all_successful](
-            std::string& err) -> bool {
-            bool success = false;
-
-            try {
-                *psink =
-                  std::make_unique<zarr::FileSink>(filename, file_handle_pool);
-                success = true;
-            } catch (const std::exception& exc) {
-                err = "Failed to create file '" + filename + "': " + exc.what();
-            }
-
-            promise->set_value();
-            all_successful.fetch_and(success);
-
-            return success;
-        };
-
-        // one thread is reserved for processing the frame queue and runs the
-        // entire lifetime of the stream
-        if (thread_pool->n_threads() == 1 || !thread_pool->push_job(job)) {
-            std::string err;
-            if (!job(err)) {
-                LOG_ERROR(err);
-            }
-        }
-    }
-
-    for (auto& future : futures) {
-        future.wait();
-    }
-
-    return (bool)all_successful;
-}
-
-bool
-make_s3_sinks(std::string_view bucket_name,
-              const std::vector<std::string>& object_keys,
-              std::shared_ptr<zarr::S3ConnectionPool> connection_pool,
-              std::vector<std::unique_ptr<zarr::Sink>>& sinks)
-{
-    if (object_keys.empty()) {
-        return true;
-    }
-
-    if (bucket_name.empty()) {
-        LOG_ERROR("Bucket name not provided.");
-        return false;
-    }
-    if (!connection_pool) {
-        LOG_ERROR("S3 connection pool not provided.");
-        return false;
-    }
-
-    const auto n_objects = object_keys.size();
-    sinks.resize(n_objects);
-    for (auto i = 0; i < n_objects; ++i) {
-        sinks[i] = std::make_unique<zarr::S3Sink>(
-          bucket_name, object_keys[i], connection_pool);
-    }
-
-    return true;
-}
 } // namespace
 
 bool
@@ -142,7 +47,8 @@ zarr::finalize_sink(std::unique_ptr<zarr::Sink>&& sink)
 std::vector<std::string>
 zarr::construct_data_paths(std::string_view base_path,
                            const ArrayDimensions& dimensions,
-                           const DimensionPartsFun& parts_along_dimension)
+                           const DimensionPartsFun& parts_along_dimension,
+                           bool create_on_fs)
 {
     std::queue<std::string> paths_queue;
     paths_queue.emplace(base_path);
@@ -155,14 +61,18 @@ zarr::construct_data_paths(std::string_view base_path,
         const auto n_parts = parts_along_dimension(dim);
         CHECK(n_parts);
 
-        auto n_paths = paths_queue.size();
+        const auto n_paths = paths_queue.size();
         for (auto j = 0; j < n_paths; ++j) {
             const auto path = paths_queue.front();
             paths_queue.pop();
 
             for (auto k = 0; k < n_parts; ++k) {
                 const auto kstr = std::to_string(k);
-                paths_queue.push(path + (path.empty() ? kstr : "/" + kstr));
+                const auto new_path = path + (path.empty() ? kstr : "/" + kstr);
+                if (create_on_fs) {
+                    fs::create_directories(new_path);
+                }
+                paths_queue.push(new_path);
             }
         }
     }
@@ -186,17 +96,6 @@ zarr::construct_data_paths(std::string_view base_path,
     }
 
     return paths_out;
-}
-
-std::vector<std::string>
-zarr::get_parent_paths(const std::vector<std::string>& file_paths)
-{
-    std::unordered_set<std::string> unique_paths;
-    for (const auto& file_path : file_paths) {
-        unique_paths.emplace(fs::path(file_path).parent_path().string());
-    }
-
-    return { unique_paths.begin(), unique_paths.end() };
 }
 
 bool
@@ -286,32 +185,6 @@ zarr::make_file_sink(std::string_view file_path,
     return std::make_unique<FileSink>(file_path, file_handle_pool);
 }
 
-bool
-zarr::make_data_file_sinks(std::string_view base_path,
-                           const ArrayDimensions& dimensions,
-                           const DimensionPartsFun& parts_along_dimension,
-                           std::shared_ptr<ThreadPool> thread_pool,
-                           std::shared_ptr<FileHandlePool> file_handle_pool,
-                           std::vector<std::unique_ptr<Sink>>& part_sinks)
-{
-    if (base_path.starts_with("file://")) {
-        base_path = base_path.substr(7);
-    }
-
-    EXPECT(!base_path.empty(), "Base path must not be empty.");
-
-    std::vector<std::string> paths;
-    try {
-        paths =
-          construct_data_paths(base_path, dimensions, parts_along_dimension);
-    } catch (const std::exception& exc) {
-        LOG_ERROR("Failed to create dataset paths: ", exc.what());
-        return false;
-    }
-
-    return make_file_sinks(paths, thread_pool, file_handle_pool, part_sinks);
-}
-
 std::unique_ptr<zarr::Sink>
 zarr::make_s3_sink(std::string_view bucket_name,
                    std::string_view object_key,
@@ -326,21 +199,4 @@ zarr::make_s3_sink(std::string_view bucket_name,
     }
 
     return std::make_unique<S3Sink>(bucket_name, object_key, connection_pool);
-}
-
-bool
-zarr::make_data_s3_sinks(std::string_view bucket_name,
-                         std::string_view base_path,
-                         const ArrayDimensions& dimensions,
-                         const DimensionPartsFun& parts_along_dimension,
-                         std::shared_ptr<S3ConnectionPool> connection_pool,
-                         std::vector<std::unique_ptr<Sink>>& part_sinks)
-{
-    EXPECT(!base_path.empty(), "Base path must not be empty.");
-    EXPECT(!bucket_name.empty(), "Bucket name must not be empty.");
-
-    const auto paths =
-      construct_data_paths(base_path, dimensions, parts_along_dimension);
-
-    return make_s3_sinks(bucket_name, paths, connection_pool, part_sinks);
 }

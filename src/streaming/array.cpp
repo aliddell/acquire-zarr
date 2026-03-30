@@ -422,13 +422,15 @@ void
 zarr::Array::make_data_paths_()
 {
     if (data_paths_.empty()) {
-        data_paths_ = construct_data_paths(
-          data_root_, *config_->dimensions, shards_along_dimension);
+        data_paths_ = construct_data_paths(data_root_,
+                                           *config_->dimensions,
+                                           shards_along_dimension,
+                                           !is_s3_array_());
     }
 }
 
 std::unique_ptr<zarr::Sink>
-zarr::Array::make_data_sink_(std::string_view path)
+zarr::Array::make_data_sink_(std::string_view path) const
 {
     const auto is_s3 = is_s3_array_();
 
@@ -439,9 +441,6 @@ zarr::Array::make_data_sink_(std::string_view path)
         const auto bucket_name = *config_->bucket_name;
         sink = make_s3_sink(bucket_name, path, s3_connection_pool_);
     } else {
-        const auto parent_paths = get_parent_paths(data_paths_);
-        CHECK(make_dirs(parent_paths, thread_pool_));
-
         sink = make_file_sink(path, file_handle_pool_);
     }
 
@@ -691,13 +690,6 @@ zarr::Array::compress_and_flush_data_()
         make_data_paths_();
     }
 
-    // create parent directories if needed
-    const auto is_s3 = is_s3_array_();
-    if (!is_s3) {
-        const auto parent_paths = get_parent_paths(data_paths_);
-        CHECK(make_dirs(parent_paths, thread_pool_)); // no-op if they exist
-    }
-
     const auto& dims = config_->dimensions;
 
     const auto n_shards = dims->number_of_shards();
@@ -799,7 +791,6 @@ zarr::Array::compress_and_flush_data_()
         futures.emplace_back(promise->get_future());
 
         auto job = [shard_idx,
-                    is_s3,
                     data_path,
                     shard_table,
                     file_offset,
