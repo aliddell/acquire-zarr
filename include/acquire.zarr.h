@@ -293,9 +293,9 @@ extern "C"
     /**
      * @brief Write custom metadata to an array.
      * @param stream The Zarr stream struct.
-     * @param array_key Optional of the array to write the metadata to. Metadata
-     * will be written to <array_key>/zarr.json. If array_key is empty or NULL,
-     * metadata will be written to the root zarr.json.
+     * @param array_key Optional key of the array to write the metadata to.
+     * Metadata will be written to <array_key>/zarr.json. If array_key is empty
+     * or NULL, metadata will be written to the root zarr.json.
      * @param metadata_key Key under 'attributes' to write the metadata to. If
      * metadata_key is empty or NULL, metadata will be written directly under
      * 'attributes'. Note: the 'ome' key is disallowed. Passing 'ome' will

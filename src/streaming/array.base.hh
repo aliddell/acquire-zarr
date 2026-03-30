@@ -125,9 +125,6 @@ class ArrayBase
     std::unordered_map<std::string, nlohmann::json> custom_metadata_;
     std::unique_ptr<Sink> metadata_sink_;
 
-    // map of metadata path (relative to array root) to sink for that metadata
-    std::unordered_map<std::string, std::unique_ptr<Sink>> metadata_sinks_;
-
     std::string node_path_() const;
     [[nodiscard]] virtual bool make_metadata_(nlohmann::json& metadata) = 0;
     [[nodiscard]] bool make_metadata_sink_();

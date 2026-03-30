@@ -71,8 +71,6 @@ zarr::ArrayBase::node_path_() const
 bool
 zarr::ArrayBase::make_metadata_sink_()
 {
-    metadata_sinks_.clear();
-
     try {
         const std::string path = node_path_() + "/" + metadata_path_;
         auto sink =

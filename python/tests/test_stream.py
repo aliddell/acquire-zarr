@@ -609,7 +609,7 @@ def test_write_custom_metadata(
         container = container[metadata_key]
         assert len(container) == 1
     else:
-        assert len(container) == 2 if multiscale else 1
+        assert len(container) == (2 if multiscale else 1)
 
     assert container.get("foo") == "bar"
 

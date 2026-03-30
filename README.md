@@ -399,7 +399,7 @@ The function takes three parameters:
   multiple arrays.
 - **`metadata_key`**: An optional key under `attributes` to nest the metadata
   under. If `NULL`/`None` or empty, metadata is written directly under
-  `attributes`. Supports path-style nesting, e.g. `"device/motor"`.
+  `attributes`.
 - **`metadata`**: A JSON-formatted string containing the metadata to write.
 
 > [!NOTE]

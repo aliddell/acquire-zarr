@@ -962,8 +962,8 @@ ZarrStream::append(const char* key_,
 
 ZarrStatusCode
 ZarrStream_s::write_custom_metadata(const std::optional<std::string>& array_key,
-                                    const std::string_view metadata_key,
-                                    const std::string_view metadata)
+                                    std::string_view metadata_key,
+                                    std::string_view metadata)
 {
 
     std::string key;

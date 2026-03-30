@@ -141,7 +141,7 @@ test_no_metadata()
 
     // immediately destroy the stream without writing anything
     ZarrStream_destroy(stream);
-    if (fs::exists(base_dir / ".zarr.json")) {
+    if (fs::exists(base_dir / "zarr.json")) {
         LOG_ERROR(
           "Metadata file should not exist when no metadata is written.");
         retval = false;

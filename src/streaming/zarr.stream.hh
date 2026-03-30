@@ -45,15 +45,15 @@ struct ZarrStream_s
 
     /**
      * @brief Write custom metadata to the stream.
+     * @param array_key Key of the array to write the metadata to.
+     * @param metadata_key Key under 'attributes' to write the metadata to.
      * @param metadata JSON-formatted custom metadata to write.
-     * @param overwrite If true, overwrite any existing custom metadata.
-     * Otherwise, fail if custom metadata has already been written.
      * @return ZarrStatusCode_Success on success, or an error code on failure.
      */
     ZarrStatusCode write_custom_metadata(
       const std::optional<std::string>& array_key,
-      const std::string_view metadata_key,
-      const std::string_view metadata);
+      std::string_view metadata_key,
+      std::string_view metadata);
 
     /**
      * @brief Get the current memory usage of the stream.
