@@ -1,6 +1,6 @@
 #pragma once
 
-#include "blosc.compression.params.hh"
+#include "compression.params.hh"
 #include "definitions.hh"
 
 #include <mutex>
@@ -97,5 +97,15 @@ class LockedBuffer
      */
     [[nodiscard]] bool compress(const zarr::BloscCompressionParams& params,
                                 size_t type_size);
+
+    /**
+     * @brief Compress the buffer in place using stock zstd.
+     */
+    [[nodiscard]] bool compress(const zarr::ZstdCompressionParams& params);
+
+    /**
+     * @brief Compress the buffer in place using stock lz4.
+     */
+    [[nodiscard]] bool compress(const zarr::Lz4CompressionParams& params);
 };
 } // namespace zarr
