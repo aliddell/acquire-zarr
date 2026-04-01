@@ -78,7 +78,6 @@ struct ArrayLifetimeProps
         }
 
         array_settings_.data_type = data_type;
-        array_settings_.multiscale = downsampling_method.has_value();
         array_settings_.downsampling_method =
           downsampling_method.value_or(ZarrDownsamplingMethod_None);
         array_settings_.is_ngff = is_ngff;

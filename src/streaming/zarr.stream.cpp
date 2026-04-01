@@ -309,7 +309,7 @@ make_array_config(const ZarrArraySettings* settings,
       make_array_dimensions(settings);
 
     std::optional<ZarrDownsamplingMethod> downsampling_method = std::nullopt;
-    if (settings->multiscale) {
+    if (settings->downsampling_method > ZarrDownsamplingMethod_None) {
         downsampling_method = settings->downsampling_method;
     }
 
@@ -417,9 +417,7 @@ validate_array_settings(const ZarrArraySettings* settings,
         }
     }
 
-    // we don't care about downsampling method if not multiscale
-    if (settings->multiscale &&
-        settings->downsampling_method >= ZarrDownsamplingMethodCount) {
+    if (settings->downsampling_method >= ZarrDownsamplingMethodCount) {
         error = "Invalid downsampling method: " +
                 std::to_string(settings->downsampling_method);
         return false;

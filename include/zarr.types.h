@@ -160,7 +160,6 @@ extern "C"
         ZarrDimensionProperties* dimensions;
         size_t dimension_count;
         ZarrDataType data_type;
-        bool multiscale;
         ZarrDownsamplingMethod downsampling_method;
         const size_t* storage_dimension_order;
         bool is_ngff;
@@ -171,7 +170,7 @@ extern "C"
      * well.
      * @note @p array_settings->output_key must be @p NULL, because the path to
      * the array is fully specified by @p path. Validation will fail if it is
-     * non-@p NULL
+     * non-NULL
      */
     typedef struct
     {
