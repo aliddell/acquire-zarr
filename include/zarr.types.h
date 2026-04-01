@@ -162,6 +162,7 @@ extern "C"
         bool multiscale;
         ZarrDownsamplingMethod downsampling_method;
         const size_t* storage_dimension_order;
+        bool is_ngff;
     } ZarrArraySettings;
 
     /**

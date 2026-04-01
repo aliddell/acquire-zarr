@@ -83,8 +83,7 @@ class ArraySettings:
       data_type: The pixel data type for the dataset.
       compression: Optional compression settings for chunks. If None, no compression is applied.
       downsampling_method: Method used for generating optional multiscale levels
-        (image pyramid). When set, the array is wrapped in an OME-NGFF
-        multiscales group. When None (default), a simple array node is written.
+        (image pyramid). When set, `is_ngff` is also coerced to True.
       storage_dimension_order: Order of dimensions for storage, which may different
         from the acquisition order defined in `dimensions`. Must be a list of dimension
         names corresponding to those in `dimensions`.
@@ -95,6 +94,9 @@ class ArraySettings:
             - The first dimension *may not* be moved to a non-leading position.
             - The last two dimensions *may not* be moved out of the final two positions,
               but MAY be swapped with each other.
+      is_ngff: Flag denoting whether this is an NGFF multiscales array. When True,
+        the array is wrapped in an OME-NGFF multiscales group. When None (default), a
+        simple array node is written.
     """
 
     output_key: str
@@ -103,6 +105,7 @@ class ArraySettings:
     compression: Optional[CompressionSettings]
     downsampling_method: Optional[DownsamplingMethod]
     storage_dimension_order: List[str]
+    is_ngff: bool
 
     def __init__(self, **kwargs) -> None: ...
     def __repr__(self) -> str: ...
@@ -453,9 +456,7 @@ class Well:
 
 class ZarrStream:
     def __init__(self, arg0: StreamSettings) -> None: ...
-    def append(
-        self, data: numpy.ndarray, key: str | None = None
-    ) -> None: ...
+    def append(self, data: numpy.ndarray, key: str | None = None) -> None: ...
     def skip(self, n_bytes: int) -> None: ...
     def write_custom_metadata(
         self, metadata: str, overwrite: bool = False
