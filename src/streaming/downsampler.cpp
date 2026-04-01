@@ -296,6 +296,8 @@ zarr::Downsampler::Downsampler(std::shared_ptr<ArrayConfig> config,
                                      std::to_string(config->dtype));
     }
 
+    EXPECT(method > ZarrDownsamplingMethod_None,
+           "Cannot construct downsampler with DownsamplingMethod: None");
     EXPECT(method < ZarrDownsamplingMethodCount,
            "Invalid downsampling method: ",
            static_cast<int>(method));

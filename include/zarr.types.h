@@ -87,7 +87,8 @@ extern "C"
 
     typedef enum
     {
-        ZarrDownsamplingMethod_Decimate = 0,
+        ZarrDownsamplingMethod_None = 0,
+        ZarrDownsamplingMethod_Decimate,
         ZarrDownsamplingMethod_Mean,
         ZarrDownsamplingMethod_Min,
         ZarrDownsamplingMethod_Max,

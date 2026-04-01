@@ -80,7 +80,7 @@ struct ArrayLifetimeProps
         array_settings_.data_type = data_type;
         array_settings_.multiscale = downsampling_method.has_value();
         array_settings_.downsampling_method =
-          downsampling_method.value_or(ZarrDownsamplingMethod_Mean);
+          downsampling_method.value_or(ZarrDownsamplingMethod_None);
         array_settings_.is_ngff = is_ngff;
 
         if (!storage_dimension_order.empty()) {
@@ -1620,6 +1620,9 @@ PYBIND11_MODULE(acquire_zarr, m)
                         settings.set_data_type(data_type->cast<ZarrDataType>());
                     }
                 }
+            }
+            if (downsampling_method) {
+                settings.set_downsampling_method(*downsampling_method);
             }
             if (is_ngff) {
                 settings.set_is_ngff(*is_ngff);
