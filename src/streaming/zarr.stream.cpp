@@ -325,6 +325,26 @@ make_array_config(const ZarrArraySettings* settings,
       downsampling_method.has_value() || settings->is_ngff);
 }
 
+std::unique_ptr<zarr::ArrayBase>
+make_array(std::shared_ptr<zarr::ArrayConfig> config,
+           std::shared_ptr<zarr::ThreadPool> thread_pool,
+           std::shared_ptr<zarr::FileHandlePool> file_handle_pool,
+           std::shared_ptr<zarr::S3ConnectionPool> s3_connection_pool)
+{
+    const auto ngff = config->downsampling_method || config->is_ngff;
+
+    std::unique_ptr<zarr::ArrayBase> array;
+    if (ngff) {
+        array = std::make_unique<zarr::MultiscaleArray>(
+          config, thread_pool, file_handle_pool, s3_connection_pool);
+    } else {
+        array = std::make_unique<zarr::Array>(
+          config, thread_pool, file_handle_pool, s3_connection_pool);
+    }
+
+    return array;
+}
+
 [[nodiscard]] bool
 validate_dimension(const ZarrDimensionProperties* dimension,
                    bool is_append,
@@ -1209,7 +1229,7 @@ ZarrStream_s::configure_array_(ZarrArraySettings* settings,
         .bytes_written = 0,
     };
     try {
-        output_node.array = zarr::make_array(
+        output_node.array = make_array(
           config, thread_pool_, file_handle_pool_, s3_connection_pool_);
     } catch (const std::exception& exc) {
         set_error_(exc.what());
