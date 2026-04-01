@@ -266,18 +266,42 @@ zarr::Array::make_metadata_()
     configuration["codecs"] = json::array({ codec });
 
     if (config_->compression_params) {
-        const auto params = *config_->compression_params;
-
-        auto compression_config = json::object();
-        compression_config["blocksize"] = 0;
-        compression_config["clevel"] = params.clevel;
-        compression_config["cname"] = params.codec_id;
-        compression_config["shuffle"] = shuffle_to_string(params.shuffle);
-        compression_config["typesize"] = bytes_of_type(config_->dtype);
-
-        auto compression_codec = json::object();
-        compression_codec["configuration"] = compression_config;
-        compression_codec["name"] = "blosc";
+        auto compression_codec = std::visit(
+          [this](const auto& params) -> json {
+              using T = std::decay_t<decltype(params)>;
+              if constexpr (std::is_same_v<T, zarr::BloscCompressionParams>) {
+                  auto config = json::object();
+                  config["blocksize"] = 0;
+                  config["clevel"] = params.clevel;
+                  config["cname"] = params.codec_id;
+                  config["shuffle"] = shuffle_to_string(params.shuffle);
+                  config["typesize"] = bytes_of_type(config_->dtype);
+                  return json::object({
+                    { "name", "blosc" },
+                    { "configuration", config },
+                  });
+              } else if constexpr (std::is_same_v<T,
+                                                   zarr::ZstdCompressionParams>) {
+                  return json::object({
+                    { "name", "zstd" },
+                    { "configuration",
+                      json::object({
+                        { "level", params.level },
+                        { "checksum", false },
+                      }) },
+                  });
+              } else {
+                  static_assert(std::is_same_v<T, zarr::Lz4CompressionParams>);
+                  return json::object({
+                    { "name", "lz4" },
+                    { "configuration",
+                      json::object({
+                        { "level", params.level },
+                      }) },
+                  });
+              }
+          },
+          *config_->compression_params);
         configuration["codecs"].push_back(compression_codec);
     }
 
@@ -743,8 +767,19 @@ zarr::Array::compress_and_flush_data_()
                 bool success = false;
 
                 try {
-                    if (!chunk_buffer.compress(compression_params,
-                                               bytes_per_px)) {
+                    bool compressed = std::visit(
+                      [&chunk_buffer, bytes_per_px](const auto& params) {
+                          using T = std::decay_t<decltype(params)>;
+                          if constexpr (std::is_same_v<
+                                          T,
+                                          zarr::BloscCompressionParams>) {
+                              return chunk_buffer.compress(params, bytes_per_px);
+                          } else {
+                              return chunk_buffer.compress(params);
+                          }
+                      },
+                      compression_params);
+                    if (!compressed) {
                         err = "Failed to compress chunk " +
                               std::to_string(chunk_idx) + " (internal index " +
                               std::to_string(internal_idx) + " of shard " +

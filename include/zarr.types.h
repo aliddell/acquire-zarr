@@ -65,6 +65,8 @@ extern "C"
     {
         ZarrCompressor_None = 0,
         ZarrCompressor_Blosc1,
+        ZarrCompressor_Zstd,
+        ZarrCompressor_Lz4,
         ZarrCompressorCount
     } ZarrCompressor;
 
@@ -73,6 +75,8 @@ extern "C"
         ZarrCompressionCodec_None = 0,
         ZarrCompressionCodec_BloscLZ4,
         ZarrCompressionCodec_BloscZstd,
+        ZarrCompressionCodec_Zstd,
+        ZarrCompressionCodec_Lz4,
         ZarrCompressionCodecCount
     } ZarrCompressionCodec;
 

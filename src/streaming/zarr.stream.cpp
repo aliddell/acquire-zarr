@@ -8,6 +8,7 @@
 #include <blosc.h>
 
 #include <bit> // bit_ceil
+#include <climits>
 #include <filesystem>
 #include <regex>
 #include <stack>
@@ -108,22 +109,74 @@ validate_compression_settings(const ZarrCompressionSettings* settings,
         return false;
     }
 
-    if (settings->level > 9) {
-        error =
-          "Invalid compression level: " + std::to_string(settings->level) +
-          ". Must be between 0 and 9";
-        return false;
-    }
-
-    if (settings->shuffle != BLOSC_NOSHUFFLE &&
-        settings->shuffle != BLOSC_SHUFFLE &&
-        settings->shuffle != BLOSC_BITSHUFFLE) {
-        error = "Invalid shuffle: " + std::to_string(settings->shuffle) +
-                ". Must be " + std::to_string(BLOSC_NOSHUFFLE) +
-                " (no shuffle), " + std::to_string(BLOSC_SHUFFLE) +
-                " (byte  shuffle), or " + std::to_string(BLOSC_BITSHUFFLE) +
-                " (bit shuffle)";
-        return false;
+    // validate compressor/codec compatibility and per-compressor constraints
+    switch (settings->compressor) {
+        case ZarrCompressor_Blosc1:
+            if (settings->codec != ZarrCompressionCodec_BloscLZ4 &&
+                settings->codec != ZarrCompressionCodec_BloscZstd) {
+                error =
+                  "Blosc1 compressor requires BloscLZ4 or BloscZstd codec";
+                return false;
+            }
+            if (settings->level > 9) {
+                error =
+                  "Invalid compression level: " +
+                  std::to_string(settings->level) +
+                  ". Blosc supports levels 0-9";
+                return false;
+            }
+            if (settings->shuffle != BLOSC_NOSHUFFLE &&
+                settings->shuffle != BLOSC_SHUFFLE &&
+                settings->shuffle != BLOSC_BITSHUFFLE) {
+                error =
+                  "Invalid shuffle: " + std::to_string(settings->shuffle) +
+                  ". Must be " + std::to_string(BLOSC_NOSHUFFLE) +
+                  " (no shuffle), " + std::to_string(BLOSC_SHUFFLE) +
+                  " (byte shuffle), or " + std::to_string(BLOSC_BITSHUFFLE) +
+                  " (bit shuffle)";
+                return false;
+            }
+            break;
+        case ZarrCompressor_Zstd:
+            if (settings->codec != ZarrCompressionCodec_Zstd) {
+                error = "Zstd compressor requires Zstd codec";
+                return false;
+            }
+            if (settings->level > 22) {
+                error =
+                  "Invalid compression level: " +
+                  std::to_string(settings->level) +
+                  ". Zstd supports levels 0-22";
+                return false;
+            }
+            if (settings->shuffle != 0) {
+                error = "Shuffle is not supported with stock zstd compression";
+                return false;
+            }
+            break;
+        case ZarrCompressor_Lz4:
+            if (settings->codec != ZarrCompressionCodec_Lz4) {
+                error = "Lz4 compressor requires Lz4 codec";
+                return false;
+            }
+            if (settings->level > 12) {
+                error =
+                  "Invalid compression level: " +
+                  std::to_string(settings->level) +
+                  ". LZ4 supports levels 0-12";
+                return false;
+            }
+            if (settings->shuffle != 0) {
+                error = "Shuffle is not supported with stock lz4 compression";
+                return false;
+            }
+            break;
+        case ZarrCompressor_None:
+            break;
+        default:
+            error =
+              "Invalid compressor: " + std::to_string(settings->compressor);
+            return false;
     }
 
     return true;
@@ -151,17 +204,26 @@ validate_custom_metadata(std::string_view metadata)
     return true;
 }
 
-std::optional<zarr::BloscCompressionParams>
+std::optional<zarr::CompressionParams>
 make_compression_params(const ZarrCompressionSettings* settings)
 {
     if (!settings || settings->compressor == ZarrCompressor_None) {
         return std::nullopt;
     }
 
-    return zarr::BloscCompressionParams(
-      zarr::blosc_codec_to_string(settings->codec),
-      settings->level,
-      settings->shuffle);
+    switch (settings->compressor) {
+        case ZarrCompressor_Blosc1:
+            return zarr::BloscCompressionParams(
+              zarr::blosc_codec_to_string(settings->codec),
+              settings->level,
+              settings->shuffle);
+        case ZarrCompressor_Zstd:
+            return zarr::ZstdCompressionParams{ settings->level };
+        case ZarrCompressor_Lz4:
+            return zarr::Lz4CompressionParams{ settings->level };
+        default:
+            return std::nullopt;
+    }
 }
 
 std::shared_ptr<ArrayDimensions>
@@ -302,11 +364,23 @@ make_array_config(const ZarrArraySettings* settings,
         return nullptr;
     }
 
-    std::optional<zarr::BloscCompressionParams> compression_params =
+    std::optional<zarr::CompressionParams> compression_params =
       make_compression_params(settings->compression_settings);
 
     std::shared_ptr<ArrayDimensions> dimensions =
       make_array_dimensions(settings);
+
+    // LZ4 API uses int for sizes — reject chunks that would overflow
+    if (settings->compression_settings &&
+        settings->compression_settings->compressor == ZarrCompressor_Lz4) {
+        const size_t chunk_bytes = dimensions->bytes_per_chunk();
+        if (chunk_bytes > static_cast<size_t>(INT_MAX)) {
+            error = "Chunk size (" + std::to_string(chunk_bytes) +
+                    " bytes) exceeds LZ4 maximum (" +
+                    std::to_string(INT_MAX) + " bytes)";
+            return nullptr;
+        }
+    }
 
     std::optional<ZarrDownsamplingMethod> downsampling_method = std::nullopt;
     if (settings->downsampling_method > ZarrDownsamplingMethod_None) {

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "array.dimensions.hh"
-#include "blosc.compression.params.hh"
+#include "compression.params.hh"
 #include "file.handle.hh"
 #include "locked.buffer.hh"
 #include "s3.connection.hh"
@@ -18,7 +18,7 @@ struct ArrayConfig
     ArrayConfig(std::string_view store_root,
                 std::string_view group_key,
                 std::optional<std::string> bucket_name,
-                std::optional<BloscCompressionParams> compression_params,
+                std::optional<CompressionParams> compression_params,
                 std::shared_ptr<ArrayDimensions> dimensions,
                 ZarrDataType dtype,
                 std::optional<ZarrDownsamplingMethod> downsampling_method,
@@ -47,7 +47,7 @@ struct ArrayConfig
     std::string store_root;
     std::string node_key;
     std::optional<std::string> bucket_name;
-    std::optional<BloscCompressionParams> compression_params;
+    std::optional<CompressionParams> compression_params;
     std::shared_ptr<ArrayDimensions> dimensions;
     ZarrDataType dtype;
     bool is_ngff;
