@@ -22,13 +22,15 @@ struct ArrayConfig
                 std::shared_ptr<ArrayDimensions> dimensions,
                 ZarrDataType dtype,
                 std::optional<ZarrDownsamplingMethod> downsampling_method,
-                uint16_t level_of_detail)
+                uint16_t level_of_detail,
+                bool is_ngff)
       : store_root(store_root)
       , node_key(group_key)
       , bucket_name(bucket_name)
       , compression_params(compression_params)
       , dimensions(std::move(dimensions))
       , dtype(dtype)
+      , is_ngff(is_ngff)
       , downsampling_method(downsampling_method)
       , level_of_detail(level_of_detail)
     {
@@ -48,6 +50,7 @@ struct ArrayConfig
     std::optional<BloscCompressionParams> compression_params;
     std::shared_ptr<ArrayDimensions> dimensions;
     ZarrDataType dtype;
+    bool is_ngff;
     std::optional<ZarrDownsamplingMethod> downsampling_method;
     uint16_t level_of_detail;
 };
@@ -123,8 +126,7 @@ std::unique_ptr<ArrayBase>
 make_array(std::shared_ptr<ArrayConfig> config,
            std::shared_ptr<ThreadPool> thread_pool,
            std::shared_ptr<FileHandlePool> file_handle_pool,
-           std::shared_ptr<S3ConnectionPool> s3_connection_pool,
-           bool is_hcs_array);
+           std::shared_ptr<S3ConnectionPool> s3_connection_pool);
 
 [[nodiscard]] bool
 finalize_array(std::unique_ptr<ArrayBase>&& array);

@@ -100,13 +100,12 @@ std::unique_ptr<zarr::ArrayBase>
 zarr::make_array(std::shared_ptr<ArrayConfig> config,
                  std::shared_ptr<ThreadPool> thread_pool,
                  std::shared_ptr<FileHandlePool> file_handle_pool,
-                 std::shared_ptr<S3ConnectionPool> s3_connection_pool,
-                 bool is_hcs_array)
+                 std::shared_ptr<S3ConnectionPool> s3_connection_pool)
 {
-    const auto multiscale = config->downsampling_method.has_value();
+    const auto ngff = config->downsampling_method || config->is_ngff;
 
     std::unique_ptr<ArrayBase> array;
-    if (multiscale || is_hcs_array) {
+    if (ngff) {
         array = std::make_unique<MultiscaleArray>(
           config, thread_pool, file_handle_pool, s3_connection_pool);
     } else {

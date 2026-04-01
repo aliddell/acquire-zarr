@@ -114,6 +114,7 @@ struct FieldOfViewLifetimeProps
         }
 
         field_of_view_.array_settings = array.array_settings();
+        field_of_view_.array_settings->is_ngff = true; // just in case
 
         return &field_of_view_;
     }
