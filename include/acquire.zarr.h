@@ -282,6 +282,9 @@ extern "C"
      * nonnegative integer. On a value of 0, this function will immediately
      * return.
      * @param[out] bytes_out The number of bytes written to the stream.
+     * @param[in] key Key to the array to append to. If the stream has more than
+     * one array configured, this cannot be NULL. If only one array is
+     * configured, a value of NULL here appends to that array.
      * @return ZarrStatusCode_Success on success, or an error code on failure.
      */
     ZarrStatusCode ZarrStream_append(ZarrStream* stream,
