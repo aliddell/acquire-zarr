@@ -2,6 +2,7 @@
 #include "zarr.common.hh"
 
 #include <blosc.h>
+#include <zstd.h>
 
 #include <regex>
 #include <stdexcept>
@@ -130,6 +131,35 @@ zarr::compress_in_place(ByteVector& data,
     }
 
     compressed_data.resize(n_bytes_compressed);
+    data.swap(compressed_data);
+
+    return true;
+}
+
+bool
+zarr::compress_in_place(ByteVector& data,
+                        const zarr::ZstdCompressionParams& params)
+{
+    if (data.empty()) {
+        LOG_WARNING("Buffer is empty, not compressing.");
+        return false;
+    }
+
+    const size_t max_dst_size = ZSTD_compressBound(data.size());
+    std::vector<uint8_t> compressed_data(max_dst_size);
+
+    const size_t compressed_size = ZSTD_compress(compressed_data.data(),
+                                                  compressed_data.size(),
+                                                  data.data(),
+                                                  data.size(),
+                                                  params.level);
+
+    if (ZSTD_isError(compressed_size)) {
+        LOG_ERROR("ZSTD_compress failed: ", ZSTD_getErrorName(compressed_size));
+        return false;
+    }
+
+    compressed_data.resize(compressed_size);
     data.swap(compressed_data);
 
     return true;

@@ -108,29 +108,65 @@ validate_compression_settings(const ZarrCompressionSettings* settings,
         return false;
     }
 
-    if (settings->level > 9) {
-        error =
-          "Invalid compression level: " + std::to_string(settings->level) +
-          ". Must be between 0 and 9";
-        return false;
-    }
-
-    if (settings->shuffle != BLOSC_NOSHUFFLE &&
-        settings->shuffle != BLOSC_SHUFFLE &&
-        settings->shuffle != BLOSC_BITSHUFFLE) {
-        error = "Invalid shuffle: " + std::to_string(settings->shuffle) +
-                ". Must be " + std::to_string(BLOSC_NOSHUFFLE) +
-                " (no shuffle), " + std::to_string(BLOSC_SHUFFLE) +
-                " (byte  shuffle), or " + std::to_string(BLOSC_BITSHUFFLE) +
-                " (bit shuffle)";
-        return false;
+    // validate compressor/codec compatibility and per-compressor constraints
+    switch (settings->compressor) {
+        case ZarrCompressor_Blosc1:
+            if (settings->codec != ZarrCompressionCodec_BloscLZ4 &&
+                settings->codec != ZarrCompressionCodec_BloscZstd) {
+                error =
+                  "Blosc1 compressor requires BloscLZ4 or BloscZstd codec";
+                return false;
+            }
+            if (settings->level > 9) {
+                error =
+                  "Invalid compression level: " +
+                  std::to_string(settings->level) +
+                  ". Blosc supports levels 0-9";
+                return false;
+            }
+            if (settings->shuffle != BLOSC_NOSHUFFLE &&
+                settings->shuffle != BLOSC_SHUFFLE &&
+                settings->shuffle != BLOSC_BITSHUFFLE) {
+                error =
+                  "Invalid shuffle: " + std::to_string(settings->shuffle) +
+                  ". Must be " + std::to_string(BLOSC_NOSHUFFLE) +
+                  " (no shuffle), " + std::to_string(BLOSC_SHUFFLE) +
+                  " (byte shuffle), or " + std::to_string(BLOSC_BITSHUFFLE) +
+                  " (bit shuffle)";
+                return false;
+            }
+            break;
+        case ZarrCompressor_Zstd:
+            if (settings->codec != ZarrCompressionCodec_Zstd) {
+                error = "Zstd compressor requires Zstd codec";
+                return false;
+            }
+            if (settings->level > 22) {
+                error =
+                  "Invalid compression level: " +
+                  std::to_string(settings->level) +
+                  ". Zstd supports levels 0-22";
+                return false;
+            }
+            if (settings->shuffle != 0) {
+                error = "Shuffle is not supported with stock zstd compression";
+                return false;
+            }
+            break;
+        case ZarrCompressor_None:
+            break;
+        default:
+            error =
+              "Invalid compressor: " + std::to_string(settings->compressor);
+            return false;
     }
 
     return true;
 }
 
 [[nodiscard]] bool
-validate_custom_metadata(std::string_view metadata)
+validate_custom_metadata(std::string_view metadata,
+                         nlohmann::json& metadata_json)
 {
     if (metadata.empty()) {
         return false;
@@ -147,21 +183,29 @@ validate_custom_metadata(std::string_view metadata)
         LOG_ERROR("Invalid JSON: '", metadata, "'");
         return false;
     }
+    metadata_json = std::move(val);
 
     return true;
 }
 
-std::optional<zarr::BloscCompressionParams>
+std::optional<zarr::CompressionParams>
 make_compression_params(const ZarrCompressionSettings* settings)
 {
     if (!settings || settings->compressor == ZarrCompressor_None) {
         return std::nullopt;
     }
 
-    return zarr::BloscCompressionParams(
-      zarr::blosc_codec_to_string(settings->codec),
-      settings->level,
-      settings->shuffle);
+    switch (settings->compressor) {
+        case ZarrCompressor_Blosc1:
+            return zarr::BloscCompressionParams(
+              zarr::blosc_codec_to_string(settings->codec),
+              settings->level,
+              settings->shuffle);
+        case ZarrCompressor_Zstd:
+            return zarr::ZstdCompressionParams{ settings->level };
+        default:
+            return std::nullopt;
+    }
 }
 
 std::shared_ptr<ArrayDimensions>
@@ -302,7 +346,7 @@ make_array_config(const ZarrArraySettings* settings,
         return nullptr;
     }
 
-    std::optional<zarr::BloscCompressionParams> compression_params =
+    std::optional<zarr::CompressionParams> compression_params =
       make_compression_params(settings->compression_settings);
 
     std::shared_ptr<ArrayDimensions> dimensions =
@@ -959,54 +1003,40 @@ ZarrStream::append(const char* key_,
 }
 
 ZarrStatusCode
-ZarrStream_s::write_custom_metadata(std::string_view custom_metadata,
-                                    bool overwrite)
+ZarrStream_s::write_custom_metadata(const std::optional<std::string>& array_key,
+                                    std::string_view metadata_key,
+                                    std::string_view metadata)
 {
-    if (!validate_custom_metadata(custom_metadata)) {
-        LOG_ERROR("Invalid custom metadata: '", custom_metadata, "'");
+
+    std::string key;
+    if (array_key.has_value()) {
+        key = zarr::regularize_key(*array_key);
+    } else if (output_arrays_.size() == 1) {
+        key = output_arrays_.begin()->first;
+    } else {
+        LOG_ERROR(
+          "Array key is required when there are multiple output arrays");
         return ZarrStatusCode_InvalidArgument;
     }
+    const std::string meta_key = zarr::regularize_key(metadata_key);
 
-    // check if we have already written custom metadata
-    if (!custom_metadata_sink_) {
-        const std::string metadata_key = "acquire.json";
-        std::string base_path = store_path_;
-        if (base_path.starts_with("file://")) {
-            base_path = base_path.substr(7);
+    if (const auto it = output_arrays_.find(key); it == output_arrays_.end()) {
+        LOG_ERROR("Array key '", key, "' not found in output arrays");
+        return ZarrStatusCode_KeyNotFound;
+    } else {
+        nlohmann::json metadata_json;
+        if (!validate_custom_metadata(metadata, metadata_json)) {
+            LOG_ERROR("Invalid custom metadata: '", metadata, "'");
+            return ZarrStatusCode_InvalidArgument;
         }
-        const auto prefix = base_path.empty() ? "" : base_path + "/";
-        const auto sink_path = prefix + metadata_key;
 
-        if (is_s3_acquisition_()) {
-            custom_metadata_sink_ = zarr::make_s3_sink(
-              s3_settings_->bucket_name, sink_path, s3_connection_pool_);
-        } else {
-            custom_metadata_sink_ =
-              zarr::make_file_sink(sink_path, file_handle_pool_);
+        if (const auto& arr = it->second;
+            !arr.array->write_custom_metadata(meta_key, metadata_json)) {
+            LOG_ERROR("Error writing custom metadata for array '", key, "'");
+            return ZarrStatusCode_IOError;
         }
-    } else if (!overwrite) { // custom metadata already written, don't overwrite
-        LOG_ERROR("Custom metadata already written, use overwrite flag");
-        return ZarrStatusCode_WillNotOverwrite;
     }
 
-    if (!custom_metadata_sink_) {
-        LOG_ERROR("Custom metadata sink not found");
-        return ZarrStatusCode_InternalError;
-    }
-
-    const auto metadata_json = nlohmann::json::parse(custom_metadata,
-                                                     nullptr, // callback
-                                                     false, // allow exceptions
-                                                     true   // ignore comments
-    );
-
-    const auto metadata_str = metadata_json.dump(4);
-    std::span data{ reinterpret_cast<const uint8_t*>(metadata_str.data()),
-                    metadata_str.size() };
-    if (!custom_metadata_sink_->write(0, data)) {
-        LOG_ERROR("Error writing custom metadata");
-        return ZarrStatusCode_IOError;
-    }
     return ZarrStatusCode_Success;
 }
 
@@ -1699,12 +1729,6 @@ finalize_stream(struct ZarrStream_s* stream)
     // shut down the thread pool, let everything after this run in the main
     // thread
     stream->thread_pool_->await_stop();
-
-    if (stream->custom_metadata_sink_ &&
-        !zarr::finalize_sink(std::move(stream->custom_metadata_sink_))) {
-        LOG_ERROR(
-          "Error finalizing Zarr stream. Failed to write custom metadata");
-    }
 
     for (auto& [key, output] : stream->output_arrays_) {
         if (!zarr::finalize_array(std::move(output.array))) {

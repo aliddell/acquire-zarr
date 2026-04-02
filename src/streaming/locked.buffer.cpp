@@ -1,7 +1,6 @@
 #include "locked.buffer.hh"
 #include "macros.hh"
-
-#include <blosc.h>
+#include "zarr.common.hh"
 
 zarr::LockedBuffer::LockedBuffer(std::vector<uint8_t>&& data)
   : data_(std::move(data))
@@ -113,29 +112,13 @@ zarr::LockedBuffer::compress(const zarr::BloscCompressionParams& params,
                              size_t type_size)
 {
     std::unique_lock lock(mutex_);
-    if (data_.empty()) {
-        LOG_WARNING("Buffer is empty, not compressing.");
-        return false;
-    }
-
-    std::vector<uint8_t> compressed_data(data_.size() + BLOSC_MAX_OVERHEAD);
-    const auto n_bytes_compressed = blosc_compress_ctx(params.clevel,
-                                                       params.shuffle,
-                                                       type_size,
-                                                       data_.size(),
-                                                       data_.data(),
-                                                       compressed_data.data(),
-                                                       compressed_data.size(),
-                                                       params.codec_id.c_str(),
-                                                       0,
-                                                       1);
-
-    if (n_bytes_compressed <= 0) {
-        LOG_ERROR("blosc_compress_ctx failed with code ", n_bytes_compressed);
-        return false;
-    }
-
-    compressed_data.resize(n_bytes_compressed);
-    data_ = compressed_data;
-    return true;
+    return compress_in_place(data_, params, type_size);
 }
+
+bool
+zarr::LockedBuffer::compress(const zarr::ZstdCompressionParams& params)
+{
+    std::unique_lock lock(mutex_);
+    return compress_in_place(data_, params);
+}
+

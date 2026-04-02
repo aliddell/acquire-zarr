@@ -4,6 +4,7 @@ set(tests
         stream-raw-to-filesystem
         stream-named-array-to-filesystem
         stream-compressed-to-filesystem
+        stream-zstd-compressed-to-filesystem
         stream-2d-multiscale-to-filesystem
         stream-3d-multiscale-to-filesystem
         stream-raw-to-s3

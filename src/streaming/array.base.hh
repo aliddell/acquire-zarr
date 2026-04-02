@@ -1,13 +1,15 @@
 #pragma once
 
 #include "array.dimensions.hh"
-#include "blosc.compression.params.hh"
+#include "compression.params.hh"
 #include "file.handle.hh"
 #include "locked.buffer.hh"
 #include "s3.connection.hh"
 #include "sink.hh"
 #include "thread.pool.hh"
 #include "zarr.types.h"
+
+#include <nlohmann/json.hpp>
 
 #include <string>
 
@@ -18,7 +20,7 @@ struct ArrayConfig
     ArrayConfig(std::string_view store_root,
                 std::string_view group_key,
                 std::optional<std::string> bucket_name,
-                std::optional<BloscCompressionParams> compression_params,
+                std::optional<CompressionParams> compression_params,
                 std::shared_ptr<ArrayDimensions> dimensions,
                 ZarrDataType dtype,
                 std::optional<ZarrDownsamplingMethod> downsampling_method,
@@ -45,7 +47,7 @@ struct ArrayConfig
     std::string store_root;
     std::string node_key;
     std::optional<std::string> bucket_name;
-    std::optional<BloscCompressionParams> compression_params;
+    std::optional<CompressionParams> compression_params;
     std::shared_ptr<ArrayDimensions> dimensions;
     ZarrDataType dtype;
     std::optional<ZarrDownsamplingMethod> downsampling_method;
@@ -68,6 +70,16 @@ class ArrayBase
               std::shared_ptr<FileHandlePool> file_handle_pool,
               std::shared_ptr<S3ConnectionPool> s3_connection_pool);
     virtual ~ArrayBase() = default;
+
+    /**
+     * @brief Write custom metadata to the array.
+     * @param key The key for the custom metadata, relative to 'attributes' in
+     * the array metadata.
+     * @param metadata The JSON value to write as custom metadata.
+     * @return True on success, false on failure.
+     */
+    bool write_custom_metadata(const std::string& key,
+                               const nlohmann::json& metadata);
 
     /**
      * @brief Get the amount of memory currently used by this Array, in bytes.
@@ -107,13 +119,15 @@ class ArrayBase
     std::shared_ptr<S3ConnectionPool> s3_connection_pool_;
     std::shared_ptr<FileHandlePool> file_handle_pool_;
 
-    std::unordered_map<std::string, std::string> metadata_strings_;
-    std::unordered_map<std::string, std::unique_ptr<Sink>> metadata_sinks_;
+    // JSON metadata
+    const std::string metadata_path_{ "zarr.json" };
+    std::mutex metadata_mutex_;
+    std::unordered_map<std::string, nlohmann::json> custom_metadata_;
+    std::unique_ptr<Sink> metadata_sink_;
 
     std::string node_path_() const;
-    [[nodiscard]] virtual bool make_metadata_() = 0;
-    virtual std::vector<std::string> metadata_keys_() const = 0;
-    [[nodiscard]] bool make_metadata_sinks_();
+    [[nodiscard]] virtual bool make_metadata_(nlohmann::json& metadata) = 0;
+    [[nodiscard]] bool make_metadata_sink_();
     [[nodiscard]] bool write_metadata_();
 
     friend bool finalize_array(std::unique_ptr<ArrayBase>&& array);
