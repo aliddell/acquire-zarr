@@ -89,12 +89,19 @@ extern "C"
 
     typedef enum
     {
-        ZarrDownsamplingMethod_None = 0, /**< Sentinel value, no downsampling */
-        ZarrDownsamplingMethod_Decimate, /**< Take the top left pixel */
-        ZarrDownsamplingMethod_Mean, /**< Average  pixels/ */
-        ZarrDownsamplingMethod_Min,
-        ZarrDownsamplingMethod_Max,
-        ZarrDownsamplingMethodCount,
+        ZarrDownsamplingMethod_None = 0, /**< No downsampling. When used with
+                                          * is_ngff=true, produces a single-level
+                                          * OME-NGFF multiscales group. */
+        ZarrDownsamplingMethod_Decimate, /**< Decimate by taking the top-left
+                                          * pixel of each 2x2 (2D) or 2x2x2 (3D)
+                                          * region. */
+        ZarrDownsamplingMethod_Mean, /**< Average all pixels in each 2x2 (2D)
+                                      *   or 2x2x2 (3D) region. */
+        ZarrDownsamplingMethod_Min,  /**< Take the minimum pixel value in each
+                                      *   2x2 (2D) or 2x2x2 (3D) region. */
+        ZarrDownsamplingMethod_Max,  /**< Take the maximum pixel value in each
+                                      *   2x2 (2D) or 2x2x2 (3D) region. */
+        ZarrDownsamplingMethodCount, /**< Sentinel value, do not use. */
     } ZarrDownsamplingMethod;
 
     /**
