@@ -118,10 +118,9 @@ validate_compression_settings(const ZarrCompressionSettings* settings,
                 return false;
             }
             if (settings->level > 9) {
-                error =
-                  "Invalid compression level: " +
-                  std::to_string(settings->level) +
-                  ". Blosc supports levels 0-9";
+                error = "Invalid compression level: " +
+                        std::to_string(settings->level) +
+                        ". Blosc supports levels 0-9";
                 return false;
             }
             if (settings->shuffle != BLOSC_NOSHUFFLE &&
@@ -142,10 +141,9 @@ validate_compression_settings(const ZarrCompressionSettings* settings,
                 return false;
             }
             if (settings->level > 22) {
-                error =
-                  "Invalid compression level: " +
-                  std::to_string(settings->level) +
-                  ". Zstd supports levels 0-22";
+                error = "Invalid compression level: " +
+                        std::to_string(settings->level) +
+                        ". Zstd supports levels 0-22";
                 return false;
             }
             if (settings->shuffle != 0) {
@@ -954,7 +952,7 @@ ZarrStream::append(const char* key_,
             // ready to enqueue the frame buffer
             if (frame_buffer_offset == bytes_of_frame) {
                 std::unique_lock lock(frame_queue_mutex_);
-                while (!frame_queue_->push(frame_buffer, key) &&
+                while (!frame_queue_->push(frame_buffer, key, std::nullopt) &&
                        process_frames_) {
                     frame_queue_not_full_cv_.wait(lock);
                 }
@@ -978,7 +976,8 @@ ZarrStream::append(const char* key_,
             frame.assign({ data, bytes_of_frame });
 
             std::unique_lock lock(frame_queue_mutex_);
-            while (!frame_queue_->push(frame, key) && process_frames_) {
+            while (!frame_queue_->push(frame, key, std::nullopt) &&
+                   process_frames_) {
                 frame_queue_not_full_cv_.wait(lock);
             }
 
@@ -1641,13 +1640,14 @@ ZarrStream_s::process_frame_queue_()
                 // done
                 if (!process_frames_) {
                     break;
-                } else {
-                    continue;
                 }
+
+                continue;
             }
         }
 
-        if (!frame_queue_->pop(frame, output_key)) {
+        std::optional<uint64_t> timestamp;
+        if (!frame_queue_->pop(frame, output_key, timestamp)) {
             continue;
         }
 

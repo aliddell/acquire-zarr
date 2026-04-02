@@ -7,6 +7,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <mutex>
+#include <optional>
 #include <queue>
 
 namespace zarr {
@@ -16,8 +17,12 @@ class FrameQueue
     explicit FrameQueue(size_t num_frames, size_t avg_frame_size);
     ~FrameQueue() = default;
 
-    bool push(LockedBuffer& frame, const std::string& key);
-    bool pop(LockedBuffer& frame, std::string& key);
+    bool push(LockedBuffer& frame,
+              const std::string& key,
+              const std::optional<uint64_t>& timestamp);
+    bool pop(LockedBuffer& frame,
+             std::string& key,
+             std::optional<uint64_t>& timestamp);
 
     size_t size() const;
     size_t bytes_used() const;
@@ -30,6 +35,7 @@ class FrameQueue
     {
         std::string key;
         LockedBuffer data;
+        std::optional<uint64_t> timestamp;
         std::atomic<bool> ready{ false };
     };
 
