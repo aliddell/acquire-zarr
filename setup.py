@@ -44,7 +44,7 @@ class CMakeBuild(build_ext):
 
         if self.compiler.compiler_type == "msvc":
             py_dir = Path(build_dir) / "python"
-            if (py_dir / cfg).is_dir() and (py_dir / cfg / "__init__*.pyd").is_file():
+            if (py_dir / cfg).is_dir():
                 py_dir = py_dir / cfg
             built_ext = str(py_dir  / "__init__*.pyd")
         else:
