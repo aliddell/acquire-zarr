@@ -43,7 +43,10 @@ class CMakeBuild(build_ext):
         subprocess.check_call(["cmake", "--build", "."] + build_args, cwd=build_dir)
 
         if self.compiler.compiler_type == "msvc":
-            built_ext = str(Path(build_dir) / "python" / cfg  / "__init__*.pyd")
+            py_dir = Path(build_dir) / "python"
+            if (py_dir / cfg).is_dir() and (py_dir / cfg / "__init__*.pyd").is_file():
+                py_dir = py_dir / cfg
+            built_ext = str(py_dir  / "__init__*.pyd")
         else:
             built_ext = str(Path(build_dir) / "python"  / "__init__*.so")
         matching_files = glob.glob(built_ext)

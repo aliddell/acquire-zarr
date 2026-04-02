@@ -123,6 +123,86 @@ setup()
 }
 
 void
+verify_group_metadata(const nlohmann::json& meta)
+{
+    auto zarr_format = meta["zarr_format"].get<int>();
+    EXPECT_EQ(int, zarr_format, 3);
+
+    auto node_type = meta["node_type"].get<std::string>();
+    EXPECT_STR_EQ(node_type.c_str(), "group");
+
+    EXPECT(meta["consolidated_metadata"].is_null(),
+           "Expected consolidated_metadata to be null");
+
+    // OME metadata
+    const auto ome = meta["attributes"]["ome"];
+    const auto multiscales = ome["multiscales"][0];
+    const auto ngff_version = ome["version"].get<std::string>();
+    EXPECT(ngff_version == "0.5",
+           "Expected version to be '0.5', but got '",
+           ngff_version,
+           "'");
+
+    const auto axes = multiscales["axes"];
+    EXPECT_EQ(size_t, axes.size(), 5);
+
+    std::string name, type, unit;
+
+    name = axes[0]["name"];
+    type = axes[0]["type"];
+    EXPECT(name == "t", "Expected name to be 't', but got '", name, "'");
+    EXPECT(type == "time", "Expected type to be 'time', but got '", type, "'");
+    EXPECT(!axes[0].contains("unit"),
+           "Expected unit to be missing, got ",
+           axes[0]["unit"].get<std::string>());
+
+    name = axes[1]["name"];
+    type = axes[1]["type"];
+    EXPECT(name == "c", "Expected name to be 'c', but got '", name, "'");
+    EXPECT(
+      type == "channel", "Expected type to be 'channel', but got '", type, "'");
+    EXPECT(!axes[1].contains("unit"),
+           "Expected unit to be missing, got ",
+           axes[1]["unit"].get<std::string>());
+
+    name = axes[2]["name"];
+    type = axes[2]["type"];
+    unit = axes[2]["unit"];
+    EXPECT(name == "z", "Expected name to be 'z', but got '", name, "'");
+    EXPECT(
+      type == "space", "Expected type to be 'space', but got '", type, "'");
+    EXPECT(unit == "millimeter",
+           "Expected unit to be 'millimeter', but got '",
+           unit,
+           "'");
+
+    name = axes[3]["name"];
+    type = axes[3]["type"];
+    unit = axes[3]["unit"];
+    EXPECT(name == "y", "Expected name to be 'y', but got '", name, "'");
+    EXPECT(
+      type == "space", "Expected type to be 'space', but got '", type, "'");
+    EXPECT(unit == "micrometer",
+           "Expected unit to be 'micrometer', but got '",
+           unit,
+           "'");
+
+    name = axes[4]["name"];
+    type = axes[4]["type"];
+    unit = axes[4]["unit"];
+    EXPECT(name == "x", "Expected name to be 'x', but got '", name, "'");
+    EXPECT(
+      type == "space", "Expected type to be 'space', but got '", type, "'");
+    EXPECT(unit == "micrometer",
+           "Expected unit to be 'micrometer', but got '",
+           unit,
+           "'");
+
+    const auto datasets = multiscales["datasets"];
+    EXPECT(datasets.size() == 1, "Expected 1 dataset, got ", datasets.size());
+}
+
+void
 verify_array_metadata(const nlohmann::json& meta)
 {
     const auto& shape = meta["shape"];
@@ -256,7 +336,18 @@ verify()
     CHECK(std::filesystem::is_directory(test_path));
 
     {
-        fs::path array_metadata_path = fs::path(test_path) / "zarr.json";
+        auto group_metadata_path = fs::path(test_path) / "zarr.json";
+        EXPECT(fs::is_regular_file(group_metadata_path),
+               "Expected file '",
+               group_metadata_path,
+               "' to exist");
+        std::ifstream f = std::ifstream(group_metadata_path);
+        auto group_metadata = nlohmann::json::parse(f);
+        verify_group_metadata(group_metadata);
+    }
+
+    {
+        fs::path array_metadata_path = fs::path(test_path) / "0/zarr.json";
         EXPECT(fs::is_regular_file(array_metadata_path),
                "Expected file '",
                array_metadata_path,
