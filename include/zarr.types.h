@@ -89,9 +89,9 @@ extern "C"
 
     typedef enum
     {
-        ZarrDownsamplingMethod_None = 0,
-        ZarrDownsamplingMethod_Decimate,
-        ZarrDownsamplingMethod_Mean,
+        ZarrDownsamplingMethod_None = 0, /**< Sentinel value, no downsampling */
+        ZarrDownsamplingMethod_Decimate, /**< Take the top left pixel */
+        ZarrDownsamplingMethod_Mean, /**< Average  pixels/ */
         ZarrDownsamplingMethod_Min,
         ZarrDownsamplingMethod_Max,
         ZarrDownsamplingMethodCount,

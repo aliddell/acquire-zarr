@@ -1798,7 +1798,10 @@ def test_append_throws_on_overflow(
     ("downsampling_method",),
     [
         (None,),
+        (DownsamplingMethod.DECIMATE,),
         (DownsamplingMethod.MEAN,),
+        (DownsamplingMethod.MIN,),
+        (DownsamplingMethod.MAX,),
     ],
 )
 def test_ngff_streams(
@@ -1847,3 +1850,5 @@ def test_ngff_streams(
         assert array.shape[0] == data.shape[0]
         assert array.shape[1] == data.shape[1] // 2
         assert array.shape[2] == data.shape[2] // 2
+    else:
+        assert "1" not in group # no pyramid created
