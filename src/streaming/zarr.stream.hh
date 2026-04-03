@@ -32,16 +32,34 @@ struct ZarrStream_s
     /**
      * @brief Append data to the stream with a specific key.
      * @param key The key to associate with the data.
-     * @param data_ Pointer to the data to append.
+     * @param data Pointer to the data to append.
      * @param bytes_in The number of bytes to append.
      * @param bytes_out The number of bytes appended.
      * @return ZarrStatusCode_Success on successful append, or an error code on
      * failure.
      */
     ZarrStatusCode append(const char* key,
-                          const void* data_,
+                          const void* data,
                           size_t bytes_in,
                           size_t& bytes_out);
+
+    /**
+     * @brief Append a frame to an array in the stream.
+     * @param key The key to associate with the data.
+     * @param data Pointer to the data to append.
+     * @param frame_id ID of the frame.
+     * @param timestamp Optional timestamp.
+     * @param bytes_in The number of bytes to append.
+     * @param bytes_out The number of bytes appended.
+     * @return ZarrStatusCode_Success on successful append, or an error code on
+     * failure.
+     */
+    ZarrStatusCode append_frame(const char* key,
+                                const void* data,
+                                uint64_t frame_id,
+                                const void* timestamp,
+                                size_t bytes_in,
+                                size_t& bytes_out);
 
     /**
      * @brief Write custom metadata to the stream.
@@ -104,8 +122,7 @@ struct ZarrStream_s
      * @param settings Struct containing settings to validate.
      * @return true if settings are valid, false otherwise.
      */
-    [[nodiscard]] bool validate_settings_(
-      const struct ZarrStreamSettings_s* settings);
+    [[nodiscard]] bool validate_settings_(const ZarrStreamSettings* settings);
 
     /**
      * @brief Configure the stream for an array.
@@ -121,12 +138,11 @@ struct ZarrStream_s
 
     /**
      * @brief Commit HCS settings to the stream.
-     * @param hcs_settings Struct containing HCS settings to commit.
+     * @param settings Struct containing HCS settings to commit.
      * @return True if the HCS settings were committed successfully, false
      * otherwise.
      */
-    [[nodiscard]] bool commit_hcs_settings_(
-      const ZarrHCSSettings* hcs_settings);
+    [[nodiscard]] bool commit_hcs_settings_(const ZarrHCSSettings* settings);
 
     /**
      * @brief Copy settings to the stream and create the output node.
@@ -134,8 +150,7 @@ struct ZarrStream_s
      * @return True if the output node was created successfully, false
      * otherwise.
      */
-    [[nodiscard]] bool commit_settings_(
-      const struct ZarrStreamSettings_s* settings);
+    [[nodiscard]] bool commit_settings_(const ZarrStreamSettings_s* settings);
 
     /**
      * @brief Spin up the thread pool.
@@ -172,8 +187,8 @@ struct ZarrStream_s
     /** @brief Wait for the frame queue to finish processing. */
     void finalize_frame_queue_();
 
-    friend bool finalize_stream(struct ZarrStream_s* stream);
+    friend bool finalize_stream(ZarrStream* stream);
 };
 
 bool
-finalize_stream(struct ZarrStream_s* stream);
+finalize_stream(ZarrStream* stream);

@@ -294,6 +294,36 @@ extern "C"
                                      const char* key);
 
     /**
+     * @brief Append a frame to the Zarr stream.
+     * @details This function will block while chunks are compressed and written
+     * to the store. It will return when all data has been written. Multiple
+     * frames can be appended in a single call.
+     * @param[in, out] stream The Zarr stream struct.
+     * @param[in] data The data to append. If @p data is NULL, append
+     * @p bytes_in zeros instead.
+     * @param[in] bytes_in The number of bytes to append, pointed to by @p data,
+     * or the number of zeros to fill if @p data is NULL. This must be either
+     * zero or exactly the size in bytes of a frame (width * height * typesize)
+     * in the array that you are appending to.
+     * @param[out] bytes_out The number of bytes written to the stream.
+     * @param[in] key Key to the array to append to. If the stream has more than
+     * one array configured, this cannot be NULL. If only one array is
+     * configured, a value of NULL here appends to that array.
+     * @param[in] frame_id ID in sequence of this frame.
+     * @param[in] timestamp Optional timestamp. Type interpretation is based on
+     * the configuration of the array.
+     * @return ZarrStatusCode_Success on success, or an error code on failure.
+     */
+    ZarrStatusCode ZarrStream_append_frame_with_timestamp(
+      ZarrStream* stream,
+      const void* data,
+      size_t bytes_in,
+      size_t* bytes_out,
+      const char* key,
+      uint64_t frame_id,
+      const void* timestamp);
+
+    /**
      * @brief Write custom metadata to an array.
      * @param stream The Zarr stream struct.
      * @param array_key Optional key of the array to write the metadata to.

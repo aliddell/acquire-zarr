@@ -1002,6 +1002,98 @@ ZarrStream::append(const char* key_,
 }
 
 ZarrStatusCode
+ZarrStream::append_frame(const char* key_,
+                         const void* data_,
+                         uint64_t frame_id,
+                         const void* timestamp_,
+                         size_t bytes_in,
+                         size_t& bytes_out)
+{
+    // internal error, don't even try to write
+    if (!error_.empty()) {
+        LOG_ERROR("Cannot append data: ", error_);
+        return ZarrStatusCode_InternalError;
+    }
+
+    bytes_out = 0; // bytes written out of the input data
+
+    // if the key is null and we have only one output array, use that
+    std::string key;
+    if (key_ == nullptr && output_arrays_.size() == 1) {
+        key = output_arrays_.begin()->first;
+    } else {
+        key = zarr::regularize_key(key_);
+    }
+
+    // key not found
+    const auto array_it = output_arrays_.find(key);
+    if (array_it == output_arrays_.end()) {
+        return ZarrStatusCode_KeyNotFound;
+    }
+
+    // skip append and return early
+    if (bytes_in == 0) {
+        LOG_INFO("Skipping append to array '", key, "': no data");
+        return ZarrStatusCode_Success;
+    }
+
+    // overflow
+    auto& output = array_it->second;
+    if (output.max_bytes > 0 &&
+        output.bytes_written + bytes_in > output.max_bytes) {
+        LOG_ERROR("Incoming byte count ",
+                  bytes_in,
+                  " will overflow array (bytes written: ",
+                  output.bytes_written,
+                  ", maximum bytes: ",
+                  output.max_bytes,
+                  ")");
+        return ZarrStatusCode_WriteOutOfBounds;
+    }
+
+    // fail if we have a nonempty frame buffer
+    if (const auto& offset = output.frame_buffer_offset; offset > 0) {
+        LOG_ERROR("Partial frame in buffer. Will not overwrite.");
+        return ZarrStatusCode_WillNotOverwrite;
+    }
+
+    // fail if the size is incorrect
+    const size_t bytes_of_frame = output.frame_buffer.size();
+    if (bytes_in != bytes_of_frame) {
+        LOG_ERROR("Incoming data has the wrong size. Expected ",
+                  bytes_of_frame,
+                  ", got ",
+                  bytes_in);
+        return ZarrStatusCode_InvalidArgument;
+    }
+
+    std::optional<uint64_t> timestamp = std::nullopt;
+    if (timestamp_) {
+        timestamp = *static_cast<const uint64_t*>(timestamp_);
+    }
+
+    // skip the frame buffer
+    auto* data = data_ ? static_cast<const uint8_t*>(data_) : nullptr;
+    zarr::LockedBuffer frame;
+    frame.assign({ data, bytes_of_frame });
+
+    std::unique_lock lock(frame_queue_mutex_);
+    while (!frame_queue_->push(frame, key, timestamp) && process_frames_) {
+        frame_queue_not_full_cv_.wait(lock);
+    }
+
+    if (process_frames_) {
+        frame_queue_not_empty_cv_.notify_one();
+    } else {
+        LOG_DEBUG("Stopping frame processing");
+    }
+
+    output.bytes_written += bytes_out = bytes_in;
+
+    return ZarrStatusCode_Success;
+}
+
+ZarrStatusCode
 ZarrStream_s::write_custom_metadata(const std::optional<std::string>& array_key,
                                     std::string_view metadata_key,
                                     std::string_view metadata)
@@ -1059,7 +1151,7 @@ ZarrStream_s::is_s3_acquisition_() const
 }
 
 bool
-ZarrStream_s::validate_settings_(const struct ZarrStreamSettings_s* settings)
+ZarrStream_s::validate_settings_(const ZarrStreamSettings* settings)
 {
     if (!settings) {
         error_ = "Null pointer: settings";
@@ -1264,18 +1356,18 @@ ZarrStream_s::configure_array_(const ZarrArraySettings* settings,
 }
 
 bool
-ZarrStream_s::commit_hcs_settings_(const ZarrHCSSettings* hcs_settings)
+ZarrStream_s::commit_hcs_settings_(const ZarrHCSSettings* settings)
 {
-    if (hcs_settings == nullptr) {
+    if (settings == nullptr) {
         return true; // nothing to do
     }
 
     plates_.clear();
     wells_.clear();
 
-    for (auto i = 0; i < hcs_settings->plate_count; ++i) {
-        const auto& plate_in = hcs_settings->plates[i];
-        const std::string plate_name(hcs_settings->plates[i].name);
+    for (auto i = 0; i < settings->plate_count; ++i) {
+        const auto& plate_in = settings->plates[i];
+        const std::string plate_name(settings->plates[i].name);
         const std::string plate_path = zarr::regularize_key(plate_in.path);
 
         std::vector<std::string> row_names(plate_in.row_count);
@@ -1716,7 +1808,7 @@ ZarrStream_s::finalize_frame_queue_()
 }
 
 bool
-finalize_stream(struct ZarrStream_s* stream)
+finalize_stream(ZarrStream* stream)
 {
     if (stream == nullptr) {
         LOG_INFO("Stream is null. Nothing to finalize.");

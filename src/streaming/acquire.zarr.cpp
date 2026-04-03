@@ -599,7 +599,7 @@ extern "C"
         settings->plate_count = 0;
     }
 
-    ZarrStream_s* ZarrStream_create(struct ZarrStreamSettings_s* settings)
+    ZarrStream_s* ZarrStream_create(ZarrStreamSettings* settings)
     {
 
         ZarrStream_s* stream = nullptr;
@@ -615,7 +615,7 @@ extern "C"
         return stream;
     }
 
-    void ZarrStream_destroy(struct ZarrStream_s* stream)
+    void ZarrStream_destroy(ZarrStream* stream)
     {
         if (!finalize_stream(stream)) {
             return;
@@ -624,7 +624,7 @@ extern "C"
         delete stream;
     }
 
-    ZarrStatusCode ZarrStream_append(struct ZarrStream_s* stream,
+    ZarrStatusCode ZarrStream_append(ZarrStream* stream,
                                      const void* data,
                                      size_t bytes_in,
                                      size_t* bytes_out,
@@ -644,7 +644,29 @@ extern "C"
         return result;
     }
 
-    ZarrStatusCode ZarrStream_write_custom_metadata(struct ZarrStream_s* stream,
+    ZarrStatusCode ZarrStream_append_frame_with_timestamp(ZarrStream* stream,
+                                                          const void* data,
+                                                          size_t bytes_in,
+                                                          size_t* bytes_out,
+                                                          const char* key,
+                                                          uint64_t frame_id,
+                                                          const void* timestamp)
+    {
+        EXPECT_VALID_ARGUMENT(stream, "Null pointer: stream");
+        EXPECT_VALID_ARGUMENT(bytes_out, "Null pointer: bytes_out");
+
+        ZarrStatusCode result = ZarrStatusCode_InternalError;
+        try {
+            result = stream->append_frame(
+              key, data, frame_id, timestamp, bytes_in, *bytes_out);
+        } catch (const std::exception& e) {
+            LOG_ERROR("Error appending data: ", e.what());
+        }
+
+        return result;
+    }
+
+    ZarrStatusCode ZarrStream_write_custom_metadata(ZarrStream* stream,
                                                     const char* array_key,
                                                     const char* metadata_key,
                                                     const char* metadata)
