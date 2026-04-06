@@ -321,7 +321,7 @@ extern "C"
       size_t* bytes_out,
       const char* key,
       uint64_t frame_id,
-      const void* timestamp);
+      const uint64_t* timestamp);
 
     /**
      * @brief Write custom metadata to an array.

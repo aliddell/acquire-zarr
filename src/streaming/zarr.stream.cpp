@@ -1005,7 +1005,7 @@ ZarrStatusCode
 ZarrStream::append_frame(const char* key_,
                          const void* data_,
                          uint64_t frame_id,
-                         const void* timestamp_,
+                         const uint64_t* timestamp_,
                          size_t bytes_in,
                          size_t& bytes_out)
 {
@@ -1069,7 +1069,7 @@ ZarrStream::append_frame(const char* key_,
 
     std::optional<uint64_t> timestamp = std::nullopt;
     if (timestamp_) {
-        timestamp = *static_cast<const uint64_t*>(timestamp_);
+        timestamp = *timestamp_;
     }
 
     // skip the frame buffer

@@ -57,7 +57,7 @@ struct ZarrStream_s
     ZarrStatusCode append_frame(const char* key,
                                 const void* data,
                                 uint64_t frame_id,
-                                const void* timestamp,
+                                const uint64_t* timestamp,
                                 size_t bytes_in,
                                 size_t& bytes_out);
 

@@ -644,13 +644,14 @@ extern "C"
         return result;
     }
 
-    ZarrStatusCode ZarrStream_append_frame_with_timestamp(ZarrStream* stream,
-                                                          const void* data,
-                                                          size_t bytes_in,
-                                                          size_t* bytes_out,
-                                                          const char* key,
-                                                          uint64_t frame_id,
-                                                          const void* timestamp)
+    ZarrStatusCode ZarrStream_append_frame_with_timestamp(
+      ZarrStream* stream,
+      const void* data,
+      size_t bytes_in,
+      size_t* bytes_out,
+      const char* key,
+      uint64_t frame_id,
+      const uint64_t* timestamp)
     {
         EXPECT_VALID_ARGUMENT(stream, "Null pointer: stream");
         EXPECT_VALID_ARGUMENT(bytes_out, "Null pointer: bytes_out");
