@@ -454,6 +454,13 @@ class Well:
 class ZarrStream:
     def __init__(self, arg0: StreamSettings) -> None: ...
     def append(self, data: numpy.ndarray, key: str | None = None) -> None: ...
+    def append_frame(
+        self,
+        data: numpy.ndarray,
+        frame_id: int,
+        key: str | None = None,
+        timestamp: int | None = None,
+    ) -> None: ...
     def skip(self, n_bytes: int) -> None: ...
     def write_custom_metadata(
         self,

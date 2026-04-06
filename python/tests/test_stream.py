@@ -1820,3 +1820,34 @@ def test_append_throws_on_overflow(
         stream.append(one_more_byte)
 
         assert e
+
+
+def test_append_frame(
+    settings: StreamSettings,
+    store_path: Path,
+    request: pytest.FixtureRequest,
+):
+    settings.store_path = str(store_path / f"{request.node.name}.zarr")
+    settings.arrays[0].data_type = np.uint16
+
+    stream = ZarrStream(settings)
+    assert stream
+
+    height = settings.arrays[0].dimensions[1].array_size_px
+    width = settings.arrays[0].dimensions[2].array_size_px
+
+    frame = np.random.randint(
+        0,
+        2**16 - 1,
+        (height, width),
+        dtype=np.uint16,
+    )
+
+    stream.append_frame(frame, 0, timestamp=int(time.time()))
+
+    stream.close()  # close the stream, flush the files
+
+    array = zarr.open(settings.store_path, mode="r")
+
+    assert array.shape == (1, height, width)
+    assert np.array_equal(array[0, :, :], frame)

@@ -1116,6 +1116,7 @@ class PyZarrStream
                             "Stream not open for appending.");
             throw py::error_already_set();
         }
+
         // if the array is already contiguous, we can just write it out
         if (image_data.flags() & py::array::c_style) {
             write_contiguous_data(image_data, key);
@@ -1133,6 +1134,83 @@ class PyZarrStream
 
         // iterate through frames
         iterate_and_append(image_data, 0, std::vector<py::ssize_t>(), key);
+    }
+
+    void append_frame(py::array frame,
+                      uint64_t frame_id,
+                      const std::optional<std::string>& key,
+                      const std::optional<py::object>& timestamp) const
+    {
+        if (!is_active()) {
+            PyErr_SetString(PyExc_RuntimeError,
+                            "Stream not open for appending.");
+            throw py::error_already_set();
+        }
+
+        py::array contiguous_data;
+        if (!(frame.flags() & py::array::c_style)) {
+            const py::module np = py::module::import("numpy");
+            contiguous_data = np.attr("ascontiguousarray")(frame);
+        } else {
+            contiguous_data = frame;
+        }
+        const auto buf = contiguous_data.request();
+        const auto* ptr = static_cast<uint8_t*>(buf.ptr);
+
+        uint64_t timestamp_val;
+        const uint64_t* p_timestamp = nullptr;
+        if (timestamp) {
+            timestamp_val = timestamp->cast<uint64_t>();
+            p_timestamp = &timestamp_val;
+        }
+
+        py::gil_scoped_release release;
+
+        const char* key_str = key.has_value() ? key->c_str() : nullptr;
+        const size_t bytes_in = buf.itemsize * buf.size;
+
+        size_t bytes_out;
+        const auto status =
+          ZarrStream_append_frame_with_timestamp(stream_.get(),
+                                                 ptr,
+                                                 bytes_in,
+                                                 &bytes_out,
+                                                 key_str,
+                                                 frame_id,
+                                                 p_timestamp);
+
+        py::gil_scoped_acquire acquire;
+
+        const std::string array_key =
+          key_str ? "'" + std::string(key_str) + "'" : "(NULL)";
+        std::string err;
+        switch (status) {
+            case ZarrStatusCode_Success:
+                break;
+            case ZarrStatusCode_KeyNotFound:
+                err = "Array key " + array_key + " not found";
+                break;
+            case ZarrStatusCode_WriteOutOfBounds:
+                err = "Attempted out of bounds write to array " + array_key;
+                break;
+            case ZarrStatusCode_PartialWrite:
+                err = "Partial write to array " + array_key + ": wrote " +
+                      std::to_string(bytes_out) +
+                      " bytes of contiguous region of " +
+                      std::to_string(bytes_in) + " bytes";
+                break;
+            case ZarrStatusCode_WillNotOverwrite:
+                err = "Partial frame in buffer. Will not overwrite.";
+                break;
+            default:
+                err = "Failed to append data to Zarr stream: " +
+                      std::string(Zarr_get_status_message(status));
+        }
+
+        if (!err.empty()) {
+            PyErr_SetString(PyExc_RuntimeError, err.c_str());
+            throw py::error_already_set();
+        }
     }
 
     void skip(size_t bytes_in, const std::optional<std::string>& key) const
@@ -1339,11 +1417,6 @@ class PyZarrStream
       std::unique_ptr<ZarrStream, decltype(ZarrStreamDeleter)>;
 
     ZarrStreamPtr stream_;
-
-    std::string store_path_;
-    std::string s3_endpoint_;
-    std::string s3_bucket_name_;
-    std::string s3_region_;
 
     // TODO (aliddell): we can make this public to allow reopening the stream
     // once we have support for that in the C API
@@ -2279,6 +2352,12 @@ PYBIND11_MODULE(acquire_zarr, m)
            &PyZarrStream::append,
            py::arg("data"),
            py::arg("key") = std::nullopt)
+      .def("append_frame",
+           &PyZarrStream::append_frame,
+           py::arg("frame"),
+           py::arg("frame_id"),
+           py::arg("key") = std::nullopt,
+           py::arg("timestamp") = std::nullopt)
       .def("skip",
            &PyZarrStream::skip,
            py::arg("n_bytes"),
