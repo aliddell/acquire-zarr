@@ -21,11 +21,23 @@ class Array : public ArrayBase
 
     size_t memory_usage() const noexcept override;
 
-    [[nodiscard]] WriteResult write_frame(LockedBuffer&,
-                                          size_t& bytes_written) override;
+    [[nodiscard]] WriteResult write_frame(
+      LockedBuffer& data,
+      size_t& bytes_written,
+      const std::optional<uint64_t>& frame_id,
+      const std::optional<uint64_t>& timestamp) override;
     size_t max_bytes() const override;
 
   protected:
+    enum class FrameIdMode
+    {
+        Unset,
+        Enabled,
+        Disabled
+    };
+    FrameIdMode frame_id_mode_{ FrameIdMode::Unset };
+    std::optional<uint64_t> last_frame_id_;
+
     std::vector<LockedBuffer> chunk_buffers_;
 
     std::vector<std::string> data_paths_;
@@ -50,7 +62,8 @@ class Array : public ArrayBase
     bool is_s3_array_() const;
 
     void make_data_paths_();
-    [[nodiscard]] std::unique_ptr<Sink> make_data_sink_(std::string_view path) const;
+    [[nodiscard]] std::unique_ptr<Sink> make_data_sink_(
+      std::string_view path) const;
     void fill_buffers_();
 
     bool should_flush_() const;

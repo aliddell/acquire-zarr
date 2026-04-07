@@ -60,6 +60,9 @@ enum class WriteResult
     PartialWrite,      // incomplete write
     OutOfBounds,       // append exceeded declared array_size_px
     FrameSizeMismatch, // data size is not equal to the expected frame size
+    SkippedFrame,      // frame ID out of sequence with previous frame ID
+    MissingFrameId,    // frame ID absent after previously ID'd frame
+    UnexpectedFrameId, // frame ID provided after previously un-ID'd frame
 };
 
 class ArrayBase
@@ -94,18 +97,23 @@ class ArrayBase
     [[nodiscard]] virtual bool close_() = 0;
 
     /**
-     * @brief Write a buffer of data to the node.
-     * @param data The data to write.
-     * @param bytes_written Set to the number of bytes written on success, or 0
-     * on failure. Implementations MUST set this before returning.
-     * @return WriteResult::Ok on success, WriteResult::PartialWrite if @p data
-     * does not constitute a complete chunk, or WriteResult::OutOfBounds if
-     * writing
-     * @p data would exceed the declared array bounds. No data is written in the
-     * OutOfBounds case.
+     * @brief Append a frame to the array.
+     * @param data Frame data buffer. Must match the expected frame size in
+     * bytes.
+     * @param bytes_written On return, the number of bytes written.
+     * @param frame_id Optional monotonically increasing frame identifier for
+     * drop detection. If provided on the first call, all subsequent calls must
+     * also provide it. Frames must be strictly sequential; gaps are treated as
+     * dropped frames. May begin at any value.
+     * @param timestamp Optional timestamp to record in the timestamp array.
+     * @return WriteResult::Ok on success, or an error code indicating the
+     * failure mode.
      */
-    [[nodiscard]] virtual WriteResult write_frame(LockedBuffer& data,
-                                                  size_t& bytes_written) = 0;
+    [[nodiscard]] virtual WriteResult write_frame(
+      LockedBuffer& data,
+      size_t& bytes_written,
+      const std::optional<uint64_t>& frame_id,
+      const std::optional<uint64_t>& timestamp) = 0;
 
     /**
      * @brief Query the maximum number of bytes we can append to this array.

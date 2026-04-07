@@ -952,8 +952,9 @@ ZarrStream::append(const char* key_,
             // ready to enqueue the frame buffer
             if (frame_buffer_offset == bytes_of_frame) {
                 std::unique_lock lock(frame_queue_mutex_);
-                while (!frame_queue_->push(frame_buffer, key, std::nullopt) &&
-                       process_frames_) {
+                while (
+                  !frame_queue_->push(frame_buffer, key, std::nullopt, std::nullopt) &&
+                  process_frames_) {
                     frame_queue_not_full_cv_.wait(lock);
                 }
                 frame_buffer.resize(bytes_of_frame);
@@ -976,8 +977,9 @@ ZarrStream::append(const char* key_,
             frame.assign({ data, bytes_of_frame });
 
             std::unique_lock lock(frame_queue_mutex_);
-            while (!frame_queue_->push(frame, key, std::nullopt) &&
-                   process_frames_) {
+            while (
+              !frame_queue_->push(frame, key, std::nullopt, std::nullopt) &&
+              process_frames_) {
                 frame_queue_not_full_cv_.wait(lock);
             }
 
@@ -1078,7 +1080,8 @@ ZarrStream::append_frame(const char* key_,
     frame.assign({ data, bytes_of_frame });
 
     std::unique_lock lock(frame_queue_mutex_);
-    while (!frame_queue_->push(frame, key, timestamp) && process_frames_) {
+    while (!frame_queue_->push(frame, key, frame_id, timestamp) &&
+           process_frames_) {
         frame_queue_not_full_cv_.wait(lock);
     }
 
@@ -1738,8 +1741,8 @@ ZarrStream_s::process_frame_queue_()
             }
         }
 
-        std::optional<uint64_t> timestamp;
-        if (!frame_queue_->pop(frame, output_key, timestamp)) {
+        std::optional<uint64_t> timestamp, frame_id;
+        if (!frame_queue_->pop(frame, output_key, frame_id, timestamp)) {
             continue;
         }
 
@@ -1755,7 +1758,8 @@ ZarrStream_s::process_frame_queue_()
 
             size_t n_bytes;
             if (const auto result =
-                  output_node.array->write_frame(frame, n_bytes);
+                  output_node.array->write_frame(
+                  frame, n_bytes, frame_id, timestamp);
                 result != zarr::WriteResult::Ok) {
                 // TODO (aliddell): retry on WriteResult::PartialWrite
                 set_error_("Failed to write frame to writer for key: " +

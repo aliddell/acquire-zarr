@@ -19,9 +19,11 @@ class FrameQueue
 
     bool push(LockedBuffer& frame,
               const std::string& key,
+              const std::optional<uint64_t>& frame_id,
               const std::optional<uint64_t>& timestamp);
     bool pop(LockedBuffer& frame,
              std::string& key,
+             std::optional<uint64_t>& frame_id,
              std::optional<uint64_t>& timestamp);
 
     size_t size() const;
@@ -35,6 +37,7 @@ class FrameQueue
     {
         std::string key;
         LockedBuffer data;
+        std::optional<uint64_t> frame_id;
         std::optional<uint64_t> timestamp;
         std::atomic<bool> ready{ false };
     };

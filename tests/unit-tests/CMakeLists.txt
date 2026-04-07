@@ -29,6 +29,7 @@ set(tests
         downsampler-odd-z
         plate
         stream-append-frame
+        array-write-frame-with-id
 )
 
 foreach (name ${tests})

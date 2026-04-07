@@ -21,6 +21,7 @@ zarr::FrameQueue::FrameQueue(size_t num_frames, size_t avg_frame_size)
 bool
 zarr::FrameQueue::push(LockedBuffer& frame,
                        const std::string& key,
+                       const std::optional<uint64_t>& frame_id,
                        const std::optional<uint64_t>& timestamp)
 {
     std::unique_lock lock(mutex_);
@@ -33,6 +34,7 @@ zarr::FrameQueue::push(LockedBuffer& frame,
 
     buffer_[write_pos].key = key;
     buffer_[write_pos].data.swap(frame);
+    buffer_[write_pos].frame_id = frame_id;
     buffer_[write_pos].timestamp = timestamp;
     buffer_[write_pos].ready.store(true, std::memory_order_release);
 
@@ -44,6 +46,7 @@ zarr::FrameQueue::push(LockedBuffer& frame,
 bool
 zarr::FrameQueue::pop(LockedBuffer& frame,
                       std::string& key,
+                      std::optional<uint64_t>& frame_id,
                       std::optional<uint64_t>& timestamp)
 {
     std::unique_lock lock(mutex_);
@@ -60,6 +63,7 @@ zarr::FrameQueue::pop(LockedBuffer& frame,
     key = buffer_[read_pos].key;
     frame.swap(buffer_[read_pos].data);
     timestamp = buffer_[read_pos].timestamp;
+    frame_id = buffer_[read_pos].frame_id;
     buffer_[read_pos].ready.store(false, std::memory_order_release);
 
     read_pos_.store((read_pos + 1) % capacity_, std::memory_order_release);

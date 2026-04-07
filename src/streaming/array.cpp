@@ -111,7 +111,10 @@ zarr::Array::memory_usage() const noexcept
 }
 
 zarr::WriteResult
-zarr::Array::write_frame(LockedBuffer& data, size_t& bytes_written)
+zarr::Array::write_frame(LockedBuffer& data,
+                         size_t& bytes_written,
+                         const std::optional<uint64_t>& frame_id,
+                         const std::optional<uint64_t>& timestamp)
 {
     bytes_written = 0;
 
@@ -126,6 +129,32 @@ zarr::Array::write_frame(LockedBuffer& data, size_t& bytes_written)
                   nbytes_data,
                   ". Skipping");
         return WriteResult::FrameSizeMismatch;
+    }
+
+    if (frame_id) {
+        if (frame_id_mode_ == FrameIdMode::Disabled) {
+            LOG_ERROR("Frame ID provided after previously un-ID'd frame.");
+            return WriteResult::UnexpectedFrameId;
+        }
+
+        if (frame_id_mode_ == FrameIdMode::Enabled &&
+            *frame_id != *last_frame_id_ + 1) {
+            LOG_ERROR("Frame ID ",
+                      *frame_id,
+                      " out of sequence. Last frame ID: ",
+                      *last_frame_id_);
+            return WriteResult::SkippedFrame;
+        }
+
+        frame_id_mode_ = FrameIdMode::Enabled;
+        last_frame_id_ = frame_id;
+    } else {
+        if (frame_id_mode_ == FrameIdMode::Enabled) {
+            LOG_ERROR("Frame ID missing after previously ID'd frame.");
+            return WriteResult::MissingFrameId;
+        }
+
+        frame_id_mode_ = FrameIdMode::Disabled;
     }
 
     // check that we can append
@@ -762,7 +791,8 @@ zarr::Array::compress_and_flush_data_()
                           if constexpr (std::is_same_v<
                                           T,
                                           zarr::BloscCompressionParams>) {
-                              return chunk_buffer.compress(params, bytes_per_px);
+                              return chunk_buffer.compress(params,
+                                                           bytes_per_px);
                           } else {
                               return chunk_buffer.compress(params);
                           }

@@ -75,8 +75,10 @@ try_append_beyond_bounds(zarr::Array& array)
 
     // append to full
     for (auto i = 0; i < array_planes; ++i) {
-        EXPECT(array.write_frame(frame, bytes_out) == zarr::WriteResult::Ok,
-               "Failed to write frames");
+        EXPECT(
+          array.write_frame(frame, bytes_out, std::nullopt, std::nullopt) ==
+            zarr::WriteResult::Ok,
+          "Failed to write frames");
         EXPECT(bytes_out == frame.size(),
                "Expected write of ",
                frame.size(),
@@ -85,7 +87,8 @@ try_append_beyond_bounds(zarr::Array& array)
     }
 
     // try to append beyond the bounds of the array
-    if (const auto result = array.write_frame(frame, bytes_out);
+    if (const auto result =
+          array.write_frame(frame, bytes_out, std::nullopt, std::nullopt);
         result != zarr::WriteResult::OutOfBounds) {
         LOG_ERROR("Unexpected write result: ", result_to_str(result));
         return false;

@@ -20,8 +20,11 @@ class MultiscaleArray : public ArrayBase
 
     size_t memory_usage() const noexcept override;
 
-    [[nodiscard]] WriteResult write_frame(LockedBuffer& data,
-                                          size_t& bytes_written) override;
+    [[nodiscard]] WriteResult write_frame(
+      LockedBuffer& data,
+      size_t& bytes_written,
+      const std::optional<uint64_t>& frame_id,
+      const std::optional<uint64_t>& timestamp) override;
     size_t max_bytes() const override;
 
   protected:
