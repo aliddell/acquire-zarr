@@ -27,7 +27,7 @@
 struct ZarrStream_s
 {
   public:
-    ZarrStream_s(struct ZarrStreamSettings_s* settings);
+    explicit ZarrStream_s(ZarrStreamSettings_s* settings);
 
     /**
      * @brief Append data to the stream with a specific key.
@@ -132,9 +132,8 @@ struct ZarrStream_s
      * treated as multiscale even if no downsampling method is supplied.
      * @return True if the array was configured successfully, false otherwise.
      */
-    [[nodiscard]] bool configure_array_(const ZarrArraySettings* settings,
-                                        const std::string& parent_path,
-                                        bool is_hcs_array);
+    [[nodiscard]] bool configure_array_(ZarrArraySettings* settings,
+                                        const std::string& parent_path);
 
     /**
      * @brief Commit HCS settings to the stream.
@@ -142,7 +141,7 @@ struct ZarrStream_s
      * @return True if the HCS settings were committed successfully, false
      * otherwise.
      */
-    [[nodiscard]] bool commit_hcs_settings_(const ZarrHCSSettings* settings);
+    [[nodiscard]] bool commit_hcs_settings_(ZarrHCSSettings* settings);
 
     /**
      * @brief Copy settings to the stream and create the output node.
@@ -150,7 +149,7 @@ struct ZarrStream_s
      * @return True if the output node was created successfully, false
      * otherwise.
      */
-    [[nodiscard]] bool commit_settings_(const ZarrStreamSettings_s* settings);
+    [[nodiscard]] bool commit_settings_(ZarrStreamSettings_s* settings);
 
     /**
      * @brief Spin up the thread pool.

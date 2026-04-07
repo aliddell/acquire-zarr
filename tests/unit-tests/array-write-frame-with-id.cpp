@@ -34,7 +34,8 @@ make_array(std::shared_ptr<zarr::ThreadPool> thread_pool)
       std::make_shared<ArrayDimensions>(std::move(dims), ZarrDataType_uint16),
       ZarrDataType_uint16,
       std::nullopt,
-      0);
+      0,
+      false);
 
     return std::make_unique<zarr::Array>(
       config, thread_pool, std::make_shared<zarr::FileHandlePool>(), nullptr);
