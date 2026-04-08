@@ -172,6 +172,7 @@ extern "C"
         ZarrDownsamplingMethod downsampling_method;
         const size_t* storage_dimension_order;
         bool is_ngff;
+        bool store_timestamps;
     } ZarrArraySettings;
 
     /**

@@ -35,6 +35,7 @@ make_array(std::shared_ptr<zarr::ThreadPool> thread_pool)
       ZarrDataType_uint16,
       std::nullopt,
       0,
+      false,
       false);
 
     return std::make_unique<zarr::Array>(

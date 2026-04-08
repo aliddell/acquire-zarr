@@ -588,7 +588,8 @@ zarr::Downsampler::make_writer_configurations_(
           prev_config->dtype,
           prev_config->downsampling_method,
           prev_config->level_of_detail + 1,
-          true);
+          true,
+          false);
 
         writer_configurations_.emplace(down_config->level_of_detail,
                                        down_config);

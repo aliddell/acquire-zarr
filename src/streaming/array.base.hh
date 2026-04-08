@@ -25,16 +25,18 @@ struct ArrayConfig
                 ZarrDataType dtype,
                 std::optional<ZarrDownsamplingMethod> downsampling_method,
                 uint16_t level_of_detail,
-                bool is_ngff)
+                bool is_ngff,
+                bool store_timestamps)
       : store_root(store_root)
       , node_key(group_key)
       , bucket_name(bucket_name)
       , compression_params(compression_params)
       , dimensions(std::move(dimensions))
       , dtype(dtype)
-      , is_ngff(is_ngff)
-      , downsampling_method(downsampling_method)
       , level_of_detail(level_of_detail)
+      , is_ngff(is_ngff || downsampling_method.has_value() || store_timestamps)
+      , downsampling_method(downsampling_method)
+      , store_timestamps(store_timestamps)
     {
         if (downsampling_method.has_value() &&
             *downsampling_method >= ZarrDownsamplingMethodCount) {
@@ -52,9 +54,10 @@ struct ArrayConfig
     std::optional<CompressionParams> compression_params;
     std::shared_ptr<ArrayDimensions> dimensions;
     ZarrDataType dtype;
+    uint16_t level_of_detail;
     bool is_ngff;
     std::optional<ZarrDownsamplingMethod> downsampling_method;
-    uint16_t level_of_detail;
+    bool store_timestamps;
 };
 
 enum class WriteResult

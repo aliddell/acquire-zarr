@@ -355,16 +355,18 @@ make_array_config(const ZarrArraySettings* settings,
         downsampling_method = settings->downsampling_method;
     }
 
-    return std::make_shared<zarr::ArrayConfig>(
-      store_root,
-      key,
-      bucket_name,
-      compression_params,
-      dimensions,
-      settings->data_type,
-      downsampling_method,
-      0,
-      downsampling_method.has_value() || settings->is_ngff);
+    const bool is_ngff = settings->is_ngff || downsampling_method.has_value() ||
+                         settings->store_timestamps;
+    return std::make_shared<zarr::ArrayConfig>(store_root,
+                                               key,
+                                               bucket_name,
+                                               compression_params,
+                                               dimensions,
+                                               settings->data_type,
+                                               downsampling_method,
+                                               0,
+                                               is_ngff,
+                                               settings->store_timestamps);
 }
 
 std::unique_ptr<zarr::ArrayBase>
@@ -972,9 +974,9 @@ ZarrStream::append(const char* key_,
             // ready to enqueue the frame buffer
             if (frame_buffer_offset == bytes_of_frame) {
                 std::unique_lock lock(frame_queue_mutex_);
-                while (
-                  !frame_queue_->push(frame_buffer, key, std::nullopt, std::nullopt) &&
-                  process_frames_) {
+                while (!frame_queue_->push(
+                         frame_buffer, key, std::nullopt, std::nullopt) &&
+                       process_frames_) {
                     frame_queue_not_full_cv_.wait(lock);
                 }
                 frame_buffer.resize(bytes_of_frame);

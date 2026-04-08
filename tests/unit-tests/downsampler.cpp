@@ -41,7 +41,8 @@ test_basic_downsampling()
                                           ZarrDataType_uint8,
                                           ZarrDownsamplingMethod_Mean,
                                           0,
-                                          true);
+                                          true,
+                                          false);
 
     zarr::Downsampler downsampler(config, ZarrDownsamplingMethod_Mean);
 
@@ -97,7 +98,8 @@ test_3d_downsampling()
                                           ZarrDataType_uint16,
                                           ZarrDownsamplingMethod_Mean,
                                           0,
-                                          true);
+                                          true,
+                                          false);
 
     zarr::Downsampler downsampler(config, ZarrDownsamplingMethod_Mean);
 
@@ -187,7 +189,8 @@ test_data_types()
                                               type,
                                               ZarrDownsamplingMethod_Mean,
                                               0,
-                                              true);
+                                              true,
+                                              false);
 
         // Just test that constructor doesn't throw
         try {
@@ -289,7 +292,8 @@ test_writer_configurations()
                                           ZarrDataType_uint16,
                                           ZarrDownsamplingMethod_Mean,
                                           0,
-                                          true);
+                                          true,
+                                          false);
 
     zarr::Downsampler downsampler(config, ZarrDownsamplingMethod_Mean);
     const auto& configs = downsampler.writer_configurations();
@@ -350,7 +354,8 @@ test_anisotropic_writer_configurations()
                                           ZarrDataType_uint16,
                                           ZarrDownsamplingMethod_Mean,
                                           0,
-                                          true);
+                                          true,
+                                          false);
 
     zarr::Downsampler downsampler(config, ZarrDownsamplingMethod_Mean);
     const auto& configs = downsampler.writer_configurations();
@@ -440,7 +445,8 @@ test_edge_cases()
                                           ZarrDataType_uint8,
                                           ZarrDownsamplingMethod_Mean,
                                           0,
-                                          true);
+                                          true,
+                                          false);
 
     zarr::Downsampler downsampler(config, ZarrDownsamplingMethod_Mean);
 
@@ -475,7 +481,8 @@ test_min_max_downsampling()
                                           ZarrDataType_uint8,
                                           ZarrDownsamplingMethod_Mean,
                                           0,
-                                          true);
+                                          true,
+                                          false);
 
     // Create a test image with a pattern that will show different results for
     // min/max/mean
@@ -570,7 +577,8 @@ test_3d_min_max_downsampling()
                                           ZarrDataType_uint16,
                                           ZarrDownsamplingMethod_Min,
                                           0,
-                                          true);
+                                          true,
+                                          false);
 
     // Test with min downsampling
     {
@@ -668,7 +676,8 @@ test_pattern_downsampling()
                                           ZarrDataType_uint16,
                                           ZarrDownsamplingMethod_Mean,
                                           0,
-                                          true);
+                                          true,
+                                          false);
 
     // Create a test image with a gradient pattern
     zarr::LockedBuffer image(

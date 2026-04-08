@@ -134,6 +134,7 @@ main()
       dtype,
       std::nullopt,
       level_of_detail,
+      false,
       false);
 
     {

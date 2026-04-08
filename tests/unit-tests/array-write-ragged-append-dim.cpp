@@ -110,7 +110,8 @@ main()
           std::make_shared<ArrayDimensions>(std::move(dims), dtype),
           dtype,
           std::nullopt,
-          4,
+          level_of_detail,
+          false,
           false);
 
         {
