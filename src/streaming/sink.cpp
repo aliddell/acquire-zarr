@@ -47,7 +47,8 @@ zarr::finalize_sink(std::unique_ptr<zarr::Sink>&& sink)
 std::vector<std::string>
 zarr::construct_data_paths(std::string_view base_path,
                            const ArrayDimensions& dimensions,
-                           const DimensionPartsFun& parts_along_dimension)
+                           const DimensionPartsFun& parts_along_dimension,
+                           bool make_directories)
 {
     std::queue<std::string> paths_queue;
     paths_queue.emplace(base_path);
@@ -67,7 +68,12 @@ zarr::construct_data_paths(std::string_view base_path,
 
             for (auto k = 0; k < n_parts; ++k) {
                 const auto kstr = std::to_string(k);
-                paths_queue.push(path + (path.empty() ? kstr : "/" + kstr));
+                const auto dirname = path + (path.empty() ? kstr : "/" + kstr);
+                paths_queue.push(dirname);
+
+                if (make_directories) {
+                    fs::create_directories(dirname);
+                }
             }
         }
     }
@@ -102,65 +108,6 @@ zarr::get_parent_paths(const std::vector<std::string>& file_paths)
     }
 
     return { unique_paths.begin(), unique_paths.end() };
-}
-
-bool
-zarr::make_dirs(const std::vector<std::string>& dir_paths,
-                std::shared_ptr<ThreadPool> thread_pool)
-{
-    if (dir_paths.empty()) {
-        return true;
-    }
-    EXPECT(thread_pool, "Thread pool not provided.");
-
-    std::atomic<char> all_successful = 1;
-    const std::unordered_set unique_paths(dir_paths.begin(), dir_paths.end());
-
-    std::vector<std::future<void>> futures;
-
-    for (const auto& path : unique_paths) {
-        auto promise = std::make_shared<std::promise<void>>();
-        futures.emplace_back(promise->get_future());
-
-        auto job = [path, promise, &all_successful](std::string& err) {
-            bool success = true;
-            try {
-                if (fs::is_directory(path) || path.empty()) {
-                    promise->set_value();
-                    return success;
-                }
-
-                std::error_code ec;
-                if (!fs::create_directories(path, ec) &&
-                    !fs::is_directory(path)) {
-                    err = "Failed to create directory '" + path +
-                          "': " + ec.message();
-                    success = false;
-                }
-            } catch (const std::exception& exc) {
-                err =
-                  "Failed to create directory '" + path + "': " + exc.what();
-                success = false;
-            }
-
-            promise->set_value();
-            all_successful.fetch_and(success);
-            return success;
-        };
-
-        if (thread_pool->n_threads() == 1 || !thread_pool->push_job(job)) {
-            if (std::string err; !job(err)) {
-                LOG_ERROR(err);
-            }
-        }
-    }
-
-    // wait for all jobs to finish
-    for (auto& future : futures) {
-        future.wait();
-    }
-
-    return all_successful;
 }
 
 std::unique_ptr<zarr::Sink>
