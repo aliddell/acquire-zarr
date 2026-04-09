@@ -52,12 +52,14 @@ finalize_sink(std::unique_ptr<Sink>&& sink);
  * @param dimensions The dimensions of the dataset.
  * @param parts_along_dimension Function to determine the number of parts along
  * a dimension.
+ * @param make_directories Create intermediate directories if true.
  * @return A vector of paths for the data sinks.
  */
 std::vector<std::string>
 construct_data_paths(std::string_view base_path,
                      const ArrayDimensions& dimensions,
-                     const DimensionPartsFun& parts_along_dimension);
+                     const DimensionPartsFun& parts_along_dimension,
+                     bool make_directories);
 
 /**
  * @brief Get unique paths to the parent directories of each file in @p
@@ -69,16 +71,6 @@ std::vector<std::string>
 get_parent_paths(const std::vector<std::string>& file_paths);
 
 /**
- * @brief Parallel create directories for a collection of paths.
- * @param dir_paths The directories to create.
- * @param thread_pool The thread pool to use for parallel creation.
- * @return True iff all directories were created successfully.
- */
-bool
-make_dirs(const std::vector<std::string>& dir_paths,
-          std::shared_ptr<ThreadPool> thread_pool);
-
-/**
  * @brief Create a file sink from a path.
  * @param file_path The path to the file.
  * @param file_handle_pool Pointer to a pool of file handles.
@@ -86,31 +78,9 @@ make_dirs(const std::vector<std::string>& dir_paths,
  * opened.
  * @throws std::runtime_error if the file path is not valid.
  */
-std::unique_ptr<zarr::Sink>
+std::unique_ptr<Sink>
 make_file_sink(std::string_view file_path,
                std::shared_ptr<FileHandlePool> file_handle_pool);
-
-/**
- * @brief Create a collection of file sinks for a Zarr dataset.
- * @param[in] base_path The path to the base directory for the dataset.
- * @param[in] dimensions The dimensions of the dataset.
- * @param[in] parts_along_dimension Function to determine the number of
- * parts (i.e., shards or chunks) along a dimension.
- * @param[in] thread_pool Pointer to a thread pool object. Used to create files
- * in parallel.
- * @param file_handle_pool Pointer to a pool of file handles.
- * @param[out] part_sinks The sinks created.
- * @return True iff all file sinks were created successfully.
- * @throws std::runtime_error if @p base_path is not valid, or if the number
- * of parts along a dimension is zero.
- */
-[[nodiscard]] bool
-make_data_file_sinks(std::string_view base_path,
-                     const ArrayDimensions& dimensions,
-                     const DimensionPartsFun& parts_along_dimension,
-                     std::shared_ptr<ThreadPool> thread_pool,
-                     std::shared_ptr<FileHandlePool> file_handle_pool,
-                     std::vector<std::unique_ptr<Sink>>& part_sinks);
 
 /**
  * @brief Create a sink from an S3 bucket name and object key.
@@ -126,24 +96,4 @@ std::unique_ptr<Sink>
 make_s3_sink(std::string_view bucket_name,
              std::string_view object_key,
              std::shared_ptr<S3ConnectionPool> connection_pool);
-
-/**
- * @brief Create a collection of S3 sinks for a Zarr dataset.
- * @param[in] bucket_name The name of the bucket in which the dataset is
- * stored.
- * @param[in] base_path The path to the base directory for the dataset.
- * @param[in] dimensions The dimensions of the dataset.
- * @param[in] parts_along_dimension Function to determine the number of
- * parts (i.e., shards or chunks) along a dimension.
- * @param[in] connection_pool Pointer to a pool of existing S3 connections.
- * @param[out] part_sinks The sinks created.
- * @return True iff all file sinks were created successfully.
- */
-[[nodiscard]] bool
-make_data_s3_sinks(std::string_view bucket_name,
-                   std::string_view base_path,
-                   const ArrayDimensions& dimensions,
-                   const DimensionPartsFun& parts_along_dimension,
-                   std::shared_ptr<S3ConnectionPool> connection_pool,
-                   std::vector<std::unique_ptr<Sink>>& part_sinks);
 } // namespace zarr
