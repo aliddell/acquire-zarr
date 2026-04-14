@@ -13,12 +13,15 @@ class Chunk
     Chunk(size_t size_bytes, size_t bytes_per_px);
     ~Chunk() = default;
 
-    void write_tile(const std::vector<uint8_t>& tile);
+    void write_tile(uint64_t internal_offset, std::vector<uint8_t>&& tile);
+
+    const std::vector<uint8_t>& buffer();
 
     bool has_data() const;
     size_t size_bytes() const;
-    std::vector<uint8_t>&& compress_and_take_buffer(
-      const std::optional<CompressionParams>& compression_params);
+    bool compress_and_take_buffer(
+      const std::optional<CompressionParams>& compression_params,
+      std::vector<uint8_t>& data);
 
   private:
     const size_t size_bytes_;
@@ -26,13 +29,8 @@ class Chunk
 
     std::mutex mutex_;
     std::vector<uint8_t> buffer_;
-    size_t offset_;
 
     bool has_data_;
-
-    void reset_();
-
-    bool compress_(const BloscCompressionParams& params);
-    bool compress_(const ZstdCompressionParams& params);
+    bool is_compressed_;
 };
 } // namespace zarr

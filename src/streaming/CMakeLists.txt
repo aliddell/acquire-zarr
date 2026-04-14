@@ -48,6 +48,8 @@ add_library(${tgt}
         plate.cpp
         chunk.hh
         chunk.cpp
+        shard.hh
+        shard.cpp
         $<TARGET_OBJECTS:acquire-logger-obj>
 )
 

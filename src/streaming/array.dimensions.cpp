@@ -2,6 +2,7 @@
 #include "macros.hh"
 #include "zarr.common.hh"
 
+#include <set>
 #include <tuple>
 #include <unordered_map>
 
@@ -371,6 +372,37 @@ ArrayDimensions::chunk_indices_for_shard_layer(uint32_t shard_index,
     }
 
     return indices;
+}
+
+std::vector<uint32_t>
+ArrayDimensions::skipped_internal_indices_for_shard_layer(uint32_t shard_index,
+                                                          uint32_t layer) const
+{
+    const auto chunks_per_shard_layer =
+      chunks_per_shard_ / chunk_layers_per_shard();
+    const auto layer_indices =
+      chunk_indices_for_shard_layer(shard_index, layer);
+
+    if (layer_indices.size() == chunks_per_shard_layer) {
+        return {};
+    }
+
+    std::set<uint32_t> internal_indices;
+    std::vector<uint32_t> skipped_indices;
+
+    for (const auto& layer_idx : layer_indices) {
+        const auto internal_idx = shard_internal_index(layer_idx);
+        internal_indices.insert(internal_idx);
+    }
+
+    const uint32_t layer_offset = chunks_per_shard_layer * layer;
+    for (auto i = 0; i < chunks_per_shard_layer; ++i) {
+        if (!internal_indices.contains(layer_offset + i)) {
+            skipped_indices.push_back(layer_offset + i);
+        }
+    }
+
+    return skipped_indices;
 }
 
 uint32_t

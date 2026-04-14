@@ -7,10 +7,12 @@
 #include <crc32c/crc32c.h>
 
 #include <algorithm> // std::fill
+#include <blosc.h>
 #include <cstring>
 #include <functional>
 #include <future>
 #include <stdexcept>
+#include <zstd.h>
 
 using json = nlohmann::json;
 
@@ -60,6 +62,26 @@ shuffle_to_string(uint8_t shuffle)
                                      std::to_string(shuffle));
     }
 }
+
+size_t
+max_compressed_size(size_t uncompressed_size,
+                    const std::optional<zarr::CompressionParams>& params)
+{
+    if (!params) {
+        return uncompressed_size;
+    }
+
+    return std::visit(
+      [&uncompressed_size]<typename ParamT>(const ParamT& params) {
+          using T = std::decay_t<ParamT>;
+          if constexpr (std::is_same_v<T, zarr::BloscCompressionParams>) {
+              return uncompressed_size + BLOSC_MAX_OVERHEAD;
+          } else {
+              return ZSTD_compressBound(uncompressed_size);
+          }
+      },
+      *params);
+}
 } // namespace
 
 zarr::Array::Array(std::shared_ptr<ArrayConfig> config,
@@ -77,7 +99,14 @@ zarr::Array::Array(std::shared_ptr<ArrayConfig> config,
 {
     const size_t n_chunks = config_->dimensions->number_of_chunks_in_memory();
     EXPECT(n_chunks > 0, "Array has zero chunks in memory");
-    chunk_buffers_ = std::vector<LockedBuffer>(n_chunks);
+
+    const size_t bytes_per_chunk = config_->dimensions->bytes_per_chunk();
+    const size_t bytes_per_px = bytes_of_type(config_->dtype);
+
+    chunks_.resize(n_chunks);
+    for (auto& chunk : chunks_) {
+        chunk = std::make_shared<Chunk>(bytes_per_chunk, bytes_per_px);
+    }
 
     const auto& dims = config_->dimensions;
     const auto number_of_shards = dims->number_of_shards();
@@ -103,8 +132,8 @@ size_t
 zarr::Array::memory_usage() const noexcept
 {
     size_t total = 0;
-    for (const auto& buf : chunk_buffers_) {
-        total += buf.size();
+    for (const auto& chunk : chunks_) {
+        total += chunk->size_bytes();
     }
 
     return total;
@@ -322,6 +351,13 @@ zarr::Array::close_()
         } else {
             CHECK(close_impl_());
         }
+
+        {
+            std::unique_lock lock(write_counter_mutex_);
+            write_counter_cv_.wait(
+              lock, [this]() { return write_counter_.load() == 0; });
+        }
+
         close_sinks_();
 
         if (frames_written_() > 0 || !custom_metadata_.empty()) {
@@ -330,7 +366,7 @@ zarr::Array::close_()
                 return false;
             }
 
-            if (!zarr::finalize_sink(std::move(metadata_sink_))) {
+            if (!finalize_sink(std::move(metadata_sink_))) {
                 LOG_ERROR("Failed to finalize metadata sink");
                 return false;
             }
@@ -440,13 +476,33 @@ zarr::Array::is_s3_array_() const
 }
 
 void
-zarr::Array::make_data_paths_()
+zarr::Array::make_shards_()
 {
     if (data_paths_.empty()) {
         data_paths_ = construct_data_paths(data_root_,
                                            *config_->dimensions,
                                            shards_along_dimension,
                                            !is_s3_array_());
+
+        const size_t n_shards = data_paths_.size();
+        const auto& dims = config_->dimensions;
+        const size_t chunks_per_shard = dims->chunks_per_shard();
+        const size_t bytes_per_chunk = dims->bytes_per_chunk();
+
+        std::unique_lock lock(shards_mutex_);
+        shards_.resize(n_shards);
+
+        for (auto shard_idx = 0; shard_idx < n_shards; ++shard_idx) {
+            ShardConfig cfg{
+                .path = data_paths_[shard_idx],
+                .chunks_per_shard = chunks_per_shard,
+                .bytes_per_chunk = bytes_per_chunk,
+                .bucket_name = config_->bucket_name,
+            };
+
+            shards_[shard_idx] = std::make_shared<Shard>(
+              std::move(cfg), file_handle_pool_, s3_connection_pool_);
+        }
     }
 }
 
@@ -470,10 +526,11 @@ zarr::Array::fill_buffers_()
 {
     LOG_DEBUG("Filling chunk buffers");
 
-    const auto n_bytes = config_->dimensions->bytes_per_chunk();
+    const size_t bytes_per_chunk = config_->dimensions->bytes_per_chunk();
+    const size_t bytes_per_px = bytes_of_type(config_->dtype);
 
-    for (auto& buf : chunk_buffers_) {
-        buf.resize_and_fill(n_bytes, 0);
+    for (auto& chunk : chunks_) {
+        chunk = std::make_shared<Chunk>(bytes_per_chunk, bytes_per_px);
     }
 }
 
@@ -552,7 +609,7 @@ zarr::Array::write_frame_to_chunks_(LockedBuffer& data)
     }
 
     const auto bytes_per_chunk = dimensions->bytes_per_chunk();
-    const auto bytes_per_row = tile_cols * bytes_per_px;
+    const auto bytes_per_tile_row = tile_cols * bytes_per_px;
 
     const auto n_tiles_x = (frame_cols + tile_cols - 1) / tile_cols;
     const auto n_tiles_y = (frame_rows + tile_rows - 1) / tile_rows;
@@ -568,75 +625,63 @@ zarr::Array::write_frame_to_chunks_(LockedBuffer& data)
     // offset among the chunks in the lattice
     const auto group_offset = dimensions->tile_group_offset(frame_id);
     // offset within the chunk
-    const auto chunk_offset =
-      static_cast<long long>(dimensions->chunk_internal_offset(frame_id));
+    const auto chunk_offset = dimensions->chunk_internal_offset(frame_id);
 
     size_t bytes_written = 0;
     const auto n_tiles = n_tiles_x * n_tiles_y;
 
 #pragma omp parallel for reduction(+ : bytes_written)
-    for (auto tile = 0; tile < n_tiles; ++tile) {
-        auto& chunk_buffer = chunk_buffers_[tile + group_offset];
-        bytes_written += chunk_buffer.with_lock([chunk_offset,
-                                                 frame_rows,
-                                                 frame_cols,
-                                                 tile_rows,
-                                                 tile_cols,
-                                                 tile,
-                                                 n_tiles_x,
-                                                 bytes_per_px,
-                                                 bytes_per_row,
-                                                 bytes_per_chunk,
-                                                 &frame](auto& chunk_data) {
-            const auto* data_ptr = frame.data();
-            const auto data_size = frame.size();
+    for (auto tile_idx = 0; tile_idx < n_tiles; ++tile_idx) {
+        auto tile = std::vector<uint8_t>(bytes_per_tile_row * tile_rows, 0);
 
-            const auto chunk_start = chunk_data.data();
+        auto& chunk = chunks_[tile_idx + group_offset];
+        const auto* data_ptr = frame.data();
+        const auto data_size = frame.size();
 
-            const auto tile_idx_y = tile / n_tiles_x;
-            const auto tile_idx_x = tile % n_tiles_x;
+        const auto tile_start = tile.data();
 
-            auto chunk_pos = chunk_offset;
-            size_t bytes_written = 0;
+        const auto tile_idx_y = tile_idx / n_tiles_x;
+        const auto tile_idx_x = tile_idx % n_tiles_x;
 
-            for (auto k = 0; k < tile_rows; ++k) {
-                const auto frame_row = tile_idx_y * tile_rows + k;
-                if (frame_row < frame_rows) {
-                    const auto frame_col = tile_idx_x * tile_cols;
+        size_t tile_pos = 0;
 
-                    const auto region_width =
-                      std::min(frame_col + tile_cols, frame_cols) - frame_col;
+        for (auto k = 0; k < tile_rows; ++k) {
+            const auto frame_row = tile_idx_y * tile_rows + k;
+            if (frame_row < frame_rows) {
+                const auto frame_col = tile_idx_x * tile_cols;
 
-                    const auto region_start =
-                      bytes_per_px * (frame_row * frame_cols + frame_col);
-                    const auto nbytes = region_width * bytes_per_px;
+                const auto region_width =
+                  std::min(frame_col + tile_cols, frame_cols) - frame_col;
 
-                    // copy region
-                    EXPECT(region_start + nbytes <= data_size,
-                           "Buffer overflow in framme. Region start: ",
-                           region_start,
-                           " nbytes: ",
-                           nbytes,
-                           " data size: ",
-                           data_size);
-                    EXPECT(chunk_pos + nbytes <= bytes_per_chunk,
-                           "Buffer overflow in chunk. Chunk pos: ",
-                           chunk_pos,
-                           " nbytes: ",
-                           nbytes,
-                           " bytes per chunk: ",
-                           bytes_per_chunk);
-                    memcpy(
-                      chunk_start + chunk_pos, data_ptr + region_start, nbytes);
-                    bytes_written += nbytes;
-                }
-                chunk_pos += bytes_per_row;
+                const auto region_start =
+                  bytes_per_px * (frame_row * frame_cols + frame_col);
+                const auto nbytes = region_width * bytes_per_px;
+
+                // copy region
+                EXPECT(region_start + nbytes <= data_size,
+                       "Buffer overflow in framme. Region start: ",
+                       region_start,
+                       " nbytes: ",
+                       nbytes,
+                       " data size: ",
+                       data_size);
+                EXPECT(tile_pos + nbytes <= tile.size(),
+                       "Buffer overflow in tile. Tile pos: ",
+                       tile_pos,
+                       " nbytes: ",
+                       nbytes,
+                       " bytes per tile: ",
+                       tile.size());
+                memcpy(tile_start + tile_pos, data_ptr + region_start, nbytes);
+                bytes_written += nbytes;
             }
+            tile_pos += bytes_per_tile_row;
+        }
 
-            return bytes_written;
-        });
+        chunk->write_tile(chunk_offset, std::move(tile));
     }
 
+    // give the data back to the frame
     data.assign(std::move(frame));
 
     return bytes_written;
@@ -685,7 +730,7 @@ zarr::Array::consolidate_chunks_(uint32_t shard_index)
     size_t offset = 0;
     for (const auto& idx : chunk_indices_this_layer) {
         // this clears the chunk data out of the LockedBuffer
-        const auto chunk = chunk_buffers_[idx - chunk_offset].take();
+        const auto& chunk = chunks_[idx - chunk_offset]->buffer();
         std::copy(chunk.begin(), chunk.end(), shard_layer.begin() + offset);
 
         offset += chunk.size();
@@ -705,227 +750,141 @@ zarr::Array::compress_and_flush_data_()
 {
     // construct paths to shard sinks if they don't already exist
     if (data_paths_.empty()) {
-        make_data_paths_();
+        make_shards_();
     }
-
-    const auto is_s3 = is_s3_array_();
 
     const auto& dims = config_->dimensions;
 
     const auto n_shards = dims->number_of_shards();
-    CHECK(data_paths_.size() == n_shards);
+    CHECK(shards_.size() == n_shards);
 
-    const auto chunks_in_memory = chunk_buffers_.size();
+    const auto chunks_in_memory = chunks_.size();
     const auto n_layers = dims->chunk_layers_per_shard();
     CHECK(n_layers > 0);
 
     const auto chunk_group_offset = current_layer_ * chunks_in_memory;
 
-    std::atomic<char> all_successful = 1;
-
     auto write_table = is_closing_ || should_rollover_();
-
-    std::vector<std::future<void>> futures;
-
-    // queue jobs to compress all chunks
-    const auto bytes_of_raw_chunk = config_->dimensions->bytes_per_chunk();
-    const auto bytes_per_px = bytes_of_type(config_->dtype);
-
-    for (auto i = 0; i < chunks_in_memory; ++i) {
-        auto promise = std::make_shared<std::promise<void>>();
-        futures.emplace_back(promise->get_future());
-
-        const auto chunk_idx = i + chunk_group_offset;
-        const auto shard_idx = dims->shard_index_for_chunk(chunk_idx);
-        const auto internal_idx = dims->shard_internal_index(chunk_idx);
-        auto* shard_table = shard_tables_.data() + shard_idx;
-
-        if (config_->compression_params) {
-            const auto compression_params = config_->compression_params.value();
-
-            auto job = [&chunk_buffer = chunk_buffers_[i],
-                        bytes_per_px,
-                        compression_params,
-                        shard_table,
-                        shard_idx,
-                        chunk_idx,
-                        internal_idx,
-                        promise,
-                        &all_successful](std::string& err) {
-                bool success = false;
-
-                try {
-                    bool compressed = std::visit(
-                      [&chunk_buffer, bytes_per_px](const auto& params) {
-                          using T = std::decay_t<decltype(params)>;
-                          if constexpr (std::is_same_v<
-                                          T,
-                                          zarr::BloscCompressionParams>) {
-                              return chunk_buffer.compress(params,
-                                                           bytes_per_px);
-                          } else {
-                              return chunk_buffer.compress(params);
-                          }
-                      },
-                      compression_params);
-                    if (!compressed) {
-                        err = "Failed to compress chunk " +
-                              std::to_string(chunk_idx) + " (internal index " +
-                              std::to_string(internal_idx) + " of shard " +
-                              std::to_string(shard_idx) + ")";
-                    }
-
-                    // update shard table with size
-                    shard_table->at(2 * internal_idx + 1) = chunk_buffer.size();
-                    success = true;
-                } catch (const std::exception& exc) {
-                    err = exc.what();
-                }
-
-                promise->set_value();
-
-                all_successful.fetch_and(static_cast<char>(success));
-                return success;
-            };
-
-            // one thread is reserved for processing the frame queue and runs
-            // the entire lifetime of the stream
-            if (thread_pool_->n_threads() == 1 ||
-                !thread_pool_->push_job(job)) {
-                std::string err;
-                if (!job(err)) {
-                    LOG_ERROR(err);
-                }
-            }
-        } else {
-            // no compression, just update shard table with size
-            shard_table->at(2 * internal_idx + 1) = bytes_of_raw_chunk;
-        }
-    }
-
-    // if we're not compressing, there aren't any futures to wait for
-    for (auto& future : futures) {
-        future.wait();
-    }
-    futures.clear();
 
     const auto bucket_name = config_->bucket_name;
     auto connection_pool = s3_connection_pool_;
 
+    const auto chunks_in_mem = dims->number_of_chunks_in_memory();
+    const auto chunk_offset = current_layer_ * chunks_in_mem;
+
     // wait for the chunks in each shard to finish compressing, then defragment
     // and write the shard
     for (auto shard_idx = 0; shard_idx < n_shards; ++shard_idx) {
-        const std::string data_path = data_paths_[shard_idx];
-        auto* file_offset = shard_file_offsets_.data() + shard_idx;
-        auto* shard_table = shard_tables_.data() + shard_idx;
+        auto shard = shards_[shard_idx];
+        const auto chunk_indices_this_layer =
+          dims->chunk_indices_for_shard_layer(shard_idx, current_layer_);
 
-        auto promise = std::make_shared<std::promise<void>>();
-        futures.emplace_back(promise->get_future());
+        // skip any chunks
+        const auto chunks_to_skip =
+          dims->skipped_internal_indices_for_shard_layer(shard_idx,
+                                                         current_layer_);
 
-        auto job = [shard_idx,
-                    is_s3,
-                    data_path,
-                    shard_table,
-                    file_offset,
-                    write_table,
-                    bucket_name,
-                    connection_pool,
-                    promise,
-                    &all_successful,
-                    this](std::string& err) {
-            bool success = true;
-            std::unique_ptr<Sink> sink;
+        for (const auto& internal_idx : chunks_to_skip) {
+            write_counter_.fetch_add(1);
+            write_counter_cv_.notify_all();
 
-            try {
-                // consolidate chunks in shard
-                const auto shard_data = consolidate_chunks_(shard_idx);
-
-                if (data_sinks_.contains(data_path)) { // S3 sink, constructed
-                    sink = std::move(data_sinks_[data_path]);
-                    data_sinks_.erase(data_path);
-                } else {
-                    sink = make_data_sink_(data_path);
+            auto job = [this, shard, internal_idx](std::string& err) {
+                bool success = false;
+                try {
+                    success = shard->skip_chunk(internal_idx);
+                } catch (const std::exception& exc) {
+                    err = std::string("Failed skipping chunk: ") + exc.what();
                 }
 
-                if (sink == nullptr) {
-                    err = "Failed to create sink for " + data_path;
-                    success = false;
-                } else {
-                    success = sink->write(*file_offset, shard_data);
-                    if (!success) {
-                        err = "Failed to write shard at path " + data_path;
-                    } else {
-                        *file_offset += shard_data.size();
+                write_counter_.fetch_sub(1);
+                write_counter_cv_.notify_all();
+                return success;
+            };
 
-                        if (write_table) {
-                            const size_t table_size =
-                              shard_table->size() * sizeof(uint64_t);
-                            std::vector<uint8_t> table(
-                              table_size + sizeof(uint32_t), 0);
+            // one thread is reserved for processing the frame queue and
+            // runs the entire lifetime of the stream
+            if (thread_pool_->n_threads() == 1 ||
+                !thread_pool_->push_job(job)) {
+                if (std::string err; !job(err)) {
+                    LOG_ERROR(err);
+                }
+            }
+        }
 
-                            memcpy(
-                              table.data(), shard_table->data(), table_size);
+        for (const auto& chunk_idx : chunk_indices_this_layer) {
+            auto& chunk = chunks_[chunk_idx - chunk_offset];
+            const auto internal_idx = dims->shard_internal_index(chunk_idx);
+            write_counter_.fetch_add(1);
+            write_counter_cv_.notify_all();
 
-                            // compute crc32 checksum of the table
-                            const uint32_t checksum =
-                              crc32c::Crc32c(table.data(), table_size);
-                            memcpy(table.data() + table_size,
-                                   &checksum,
-                                   sizeof(uint32_t));
+            auto job = [this,
+                        shard,
+                        internal_idx,
+                        chunk = std::move(chunk),
+                        params =
+                          config_->compression_params](std::string& err) {
+                bool success = false;
 
-                            if (!sink->write(*file_offset, table)) {
-                                err = "Failed to write table and checksum to "
-                                      "shard " +
-                                      std::to_string(shard_idx);
-                                success = false;
-                            }
+                constexpr size_t n_retries = 3;
+                size_t retry = 0;
+
+                try {
+                    do {
+                        if (shard->compress_and_write_chunk(
+                              internal_idx, chunk, params)) {
+                            success = true;
+                            break;
                         }
-                    }
+
+                        std::this_thread::sleep_for(std::chrono::milliseconds(
+                          static_cast<int>(std::pow(10, ++retry))));
+                    } while (retry < n_retries);
+                } catch (const std::exception& exc) {
+                    err = std::string("Failed to write chunk: ") + exc.what();
                 }
-            } catch (const std::exception& exc) {
-                err = "Failed to flush data: " + std::string(exc.what());
-                success = false;
-            }
 
-            if (sink != nullptr) {
-                data_sinks_.emplace(data_path, std::move(sink));
-            }
+                if (!success && err.empty()) {
+                    err = "Failed to write chunk after " +
+                          std::to_string(n_retries) + " retries";
+                }
 
-            all_successful.fetch_and(success);
-            promise->set_value();
+                write_counter_.fetch_sub(1);
+                write_counter_cv_.notify_all();
+                return success;
+            };
 
-            return success;
-        };
-
-        // one thread is reserved for processing the frame queue and runs the
-        // entire lifetime of the stream
-        if (thread_pool_->n_threads() == 1 || !thread_pool_->push_job(job)) {
-            std::string err;
-            if (!job(err)) {
-                LOG_ERROR(err);
+            // one thread is reserved for processing the frame queue and
+            // runs the entire lifetime of the stream
+            if (thread_pool_->n_threads() == 1 ||
+                !thread_pool_->push_job(job)) {
+                if (std::string err; !job(err)) {
+                    LOG_ERROR(err);
+                }
             }
         }
     }
 
     // wait for all threads to finish
-    for (auto& future : futures) {
-        future.wait();
-    }
+    // for (auto& future : futures) {
+    //     future.wait();
+    // }
 
     // reset shard tables and file offsets
     if (write_table) {
-        for (auto& table : shard_tables_) {
-            std::fill(
-              table.begin(), table.end(), std::numeric_limits<uint64_t>::max());
-        }
-
-        std::fill(shard_file_offsets_.begin(), shard_file_offsets_.end(), 0);
+        // for (auto& table : shard_tables_) {
+        //     std::fill(
+        //       table.begin(), table.end(),
+        //       std::numeric_limits<uint64_t>::max());
+        // }
+        //
+        // std::fill(shard_file_offsets_.begin(), shard_file_offsets_.end(), 0);
         current_layer_ = 0;
     } else {
         ++current_layer_;
     }
 
-    return static_cast<bool>(all_successful);
+    // return static_cast<bool>(all_successful);
+    return true;
 }
 
 bool

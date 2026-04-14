@@ -1,11 +1,12 @@
 #pragma once
 
 #include "array.base.hh"
-#include "blosc.compression.params.hh"
+#include "chunk.hh"
 #include "definitions.hh"
 #include "file.sink.hh"
 #include "locked.buffer.hh"
 #include "s3.connection.hh"
+#include "shard.hh"
 #include "thread.pool.hh"
 
 namespace zarr {
@@ -26,7 +27,14 @@ class Array : public ArrayBase
     size_t max_bytes() const override;
 
   protected:
-    std::vector<LockedBuffer> chunk_buffers_;
+    std::vector<std::shared_ptr<Chunk>> chunks_;
+    std::vector<std::shared_ptr<Shard>> shards_;
+
+    std::mutex shards_mutex_;
+
+    std::atomic<size_t> write_counter_;
+    std::mutex write_counter_mutex_;
+    std::condition_variable write_counter_cv_;
 
     std::vector<std::string> data_paths_;
     std::unordered_map<std::string, std::unique_ptr<Sink>> data_sinks_;
@@ -49,8 +57,9 @@ class Array : public ArrayBase
 
     bool is_s3_array_() const;
 
-    void make_data_paths_();
-    [[nodiscard]] std::unique_ptr<Sink> make_data_sink_(std::string_view path) const;
+    void make_shards_();
+    [[nodiscard]] std::unique_ptr<Sink> make_data_sink_(
+      std::string_view path) const;
     void fill_buffers_();
 
     bool should_flush_() const;
