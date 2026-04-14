@@ -3,6 +3,8 @@
 
 #include <crc32c/crc32c.h>
 
+#include <cstring>
+
 zarr::Shard::Shard(const ShardConfig& config,
                    std::shared_ptr<FileHandlePool> file_handle_pool,
                    std::shared_ptr<S3ConnectionPool> s3_connection_pool)

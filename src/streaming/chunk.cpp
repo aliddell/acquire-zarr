@@ -3,6 +3,7 @@
 #include "zarr.common.hh"
 
 #include <algorithm>
+#include <cstring>
 
 zarr::Chunk::Chunk(size_t size_bytes, size_t bytes_per_px)
   : size_bytes_(size_bytes)
