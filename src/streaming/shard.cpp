@@ -29,16 +29,19 @@ zarr::Shard::Shard(const ShardConfig& config,
 
 zarr::Shard::~Shard()
 {
-    if (!table_flushed_) {
+    try {
         bool res = false;
-        try {
+        if (!table_flushed_) {
             res = write_table_();
-            if (!res) {
-                LOG_ERROR("Failed to write shard table.");
-            }
-        } catch (const std::exception& exc) {
-            LOG_ERROR("Failed to write table to shard: ", exc.what());
         }
+
+        if (!res) {
+            LOG_ERROR("Failed to write shard table.");
+        }
+
+        finalize_sink(std::move(sink_));
+    } catch (const std::exception& exc) {
+        LOG_ERROR("Failed to finalize shard: ", exc.what());
     }
 }
 

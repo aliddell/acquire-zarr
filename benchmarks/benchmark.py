@@ -326,7 +326,7 @@ def compare(
 
         try:
             print("\nCleaning up acquire-zarr output...", end="")
-            shutil.rmtree(az_path) # cleanup
+            shutil.rmtree(az_path)  # cleanup
             print("[OK]")
         except Exception as e:
             print("[ERROR]", e)
@@ -402,6 +402,44 @@ def compare(
     return results
 
 
+def summarize_runs(runs: list[dict]) -> dict:
+    """Compute mean/std/min/max across runs for tracked metrics."""
+    metrics = {
+        "az": [
+            "throughput_gib_per_s",
+            "frame_write_time_50th_percentile_ms",
+            "frame_write_time_99th_percentile_ms",
+        ],
+        "ts": [
+            "throughput_gib_per_s",
+            "frame_write_time_50th_percentile_ms",
+            "frame_write_time_99th_percentile_ms",
+        ],
+    }
+    summary = {}
+
+    for lib, lib_key in [("az", "acquire_zarr"), ("ts", "tensorstore")]:
+        summary[lib_key] = {}
+        for metric in metrics[lib]:
+            values = np.array([r[lib_key][metric] for r in runs])
+            summary[lib_key][metric] = {
+                "mean": float(np.mean(values)),
+                "std": float(np.std(values)),
+                "min": float(np.min(values)),
+                "max": float(np.max(values)),
+            }
+
+    ratio_values = np.array([r["ratio_ts_to_az"] for r in runs])
+    summary["ratio_ts_to_az"] = {
+        "mean": float(np.mean(ratio_values)),
+        "std": float(np.std(ratio_values)),
+        "min": float(np.min(ratio_values)),
+        "max": float(np.max(ratio_values)),
+    }
+
+    return summary
+
+
 @click.command()
 @click.option("--t-chunk-size", default=64, help="Time dimension chunk size")
 @click.option(
@@ -412,6 +450,9 @@ def compare(
 )
 @click.option("--frame-count", default=1024, help="Number of frames to write")
 @click.option(
+    "--num-runs", default=3, help="Number of repeated benchmark runs"
+)
+@click.option(
     "--output", default="results.json", help="Output file for results"
 )
 @click.option(
@@ -420,17 +461,41 @@ def compare(
     help="Disable data comparison between implementations",
 )
 def main(
-    t_chunk_size, xy_chunk_size, xy_shard_size, frame_count, output, nocompare
+    t_chunk_size,
+    xy_chunk_size,
+    xy_shard_size,
+    frame_count,
+    num_runs,
+    output,
+    nocompare,
 ):
     """Compare write performance of TensorStore vs. acquire-zarr for a Zarr v3 store."""
-    results = compare(
-        t_chunk_size, xy_chunk_size, xy_shard_size, frame_count, not nocompare
-    )
+    all_runs = []
+    for run_idx in range(num_runs):
+        print(
+            f"\n[bold cyan]--- Run {run_idx + 1} of {num_runs} ---[/bold cyan]"
+        )
+        result = compare(
+            t_chunk_size,
+            xy_chunk_size,
+            xy_shard_size,
+            frame_count,
+            not nocompare,
+        )
+        all_runs.append(result)
+
+    summary = summarize_runs(all_runs)
+
+    output_data = {
+        "runs": all_runs,
+        "summary": summary,
+    }
 
     with open(output, "w") as f:
-        json.dump(results, f, indent=2)
-
+        json.dump(output_data, f, indent=2)
     print(f"\nResults written to {output}")
+
+    # visualize(all_runs, summary, output_prefix=Path(output).stem)
 
 
 if __name__ == "__main__":

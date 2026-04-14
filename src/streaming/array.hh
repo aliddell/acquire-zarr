@@ -37,7 +37,6 @@ class Array : public ArrayBase
     std::condition_variable write_counter_cv_;
 
     std::vector<std::string> data_paths_;
-    std::unordered_map<std::string, std::unique_ptr<Sink>> data_sinks_;
 
     const uint64_t max_bytes_;       // max number of bytes that can be written
     const uint64_t bytes_per_frame_; // number of bytes per frame
@@ -53,7 +52,6 @@ class Array : public ArrayBase
 
     bool make_metadata_(nlohmann::json& metadata) override;
     [[nodiscard]] bool close_() override;
-    [[nodiscard]] bool close_impl_();
 
     bool is_s3_array_() const;
 
@@ -65,7 +63,7 @@ class Array : public ArrayBase
     bool should_flush_() const;
     bool should_rollover_() const;
 
-    size_t write_frame_to_chunks_(LockedBuffer& data);
+    size_t write_frame_to_chunks_(LockedBuffer& data) const;
 
     [[nodiscard]] ByteVector consolidate_chunks_(uint32_t shard_index);
     [[nodiscard]] bool compress_and_flush_data_();

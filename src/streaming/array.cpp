@@ -348,8 +348,6 @@ zarr::Array::close_()
     try {
         if (bytes_to_flush_ > 0) {
             CHECK(compress_and_flush_data_());
-        } else {
-            CHECK(close_impl_());
         }
 
         {
@@ -378,95 +376,6 @@ zarr::Array::close_()
 
     is_closing_ = false;
     return retval;
-}
-
-bool
-zarr::Array::close_impl_()
-{
-    if (current_layer_ == 0) {
-        return true;
-    }
-
-    // write the table
-    const auto& dims = config_->dimensions;
-    const auto n_shards = dims->number_of_shards();
-    std::vector<std::future<void>> futures;
-
-    std::atomic<char> all_successful = 1;
-
-    for (auto shard_idx = 0; shard_idx < n_shards; ++shard_idx) {
-        const std::string data_path = data_paths_[shard_idx];
-        auto* file_offset = shard_file_offsets_.data() + shard_idx;
-        auto* shard_table = shard_tables_.data() + shard_idx;
-
-        auto promise = std::make_shared<std::promise<void>>();
-        futures.emplace_back(promise->get_future());
-
-        auto job = [shard_idx,
-                    data_path,
-                    shard_table,
-                    file_offset,
-                    promise,
-                    &all_successful,
-                    this](std::string& err) {
-            bool success = true;
-
-            try {
-                std::unique_ptr<Sink> sink;
-
-                if (data_sinks_.contains(
-                      data_path)) { // sink already constructed
-                    sink = std::move(data_sinks_[data_path]);
-                    data_sinks_.erase(data_path);
-                } else {
-                    sink = make_data_sink_(data_path);
-                }
-
-                if (sink == nullptr) {
-                    err = "Failed to create sink for " + data_path;
-                    success = false;
-                } else {
-                    const auto table_size =
-                      shard_table->size() * sizeof(uint64_t);
-                    std::vector<uint8_t> table(table_size + sizeof(uint32_t));
-
-                    // copy the table data
-                    memcpy(table.data(), shard_table->data(), table_size);
-                    const auto* table_ptr = table.data();
-
-                    // compute crc32 checksum of the table
-                    const uint32_t checksum =
-                      crc32c::Crc32c(table_ptr, table_size);
-                    memcpy(
-                      table.data() + table_size, &checksum, sizeof(uint32_t));
-
-                    if (!sink->write(*file_offset, table)) {
-                        err = "Failed to write table and checksum to shard " +
-                              std::to_string(shard_idx);
-                        success = false;
-                    }
-                }
-            } catch (const std::exception& exc) {
-                err = "Failed to flush data: " + std::string(exc.what());
-                success = false;
-            }
-
-            all_successful.fetch_and(success);
-            promise->set_value();
-
-            return success;
-        };
-
-        // one thread is reserved for processing the frame queue and runs the
-        // entire lifetime of the stream
-        if (thread_pool_->n_threads() == 1 || !thread_pool_->push_job(job)) {
-            if (std::string err; !job(err)) {
-                LOG_ERROR(err);
-            }
-        }
-    }
-
-    return all_successful;
 }
 
 bool
@@ -564,7 +473,7 @@ transpose_frame(const uint8_t* src,
 } // namespace
 
 size_t
-zarr::Array::write_frame_to_chunks_(LockedBuffer& data)
+zarr::Array::write_frame_to_chunks_(LockedBuffer& data) const
 {
     // break the frame into tiles and write them to the chunk buffers
     const auto bytes_per_px = bytes_of_type(config_->dtype);
@@ -630,10 +539,14 @@ zarr::Array::write_frame_to_chunks_(LockedBuffer& data)
     size_t bytes_written = 0;
     const auto n_tiles = n_tiles_x * n_tiles_y;
 
+    std::vector<std::vector<uint8_t>> tiles(n_tiles);
+    for (auto& tile : tiles) {
+        tile.resize(bytes_per_tile_row * tile_rows, 0);
+    }
+
 #pragma omp parallel for reduction(+ : bytes_written)
     for (auto tile_idx = 0; tile_idx < n_tiles; ++tile_idx) {
-        auto tile = std::vector<uint8_t>(bytes_per_tile_row * tile_rows, 0);
-
+        auto& tile = tiles[tile_idx];
         auto& chunk = chunks_[tile_idx + group_offset];
         const auto* data_ptr = frame.data();
         const auto data_size = frame.size();
@@ -934,12 +847,7 @@ void
 zarr::Array::close_sinks_()
 {
     data_paths_.clear();
-
-    for (auto& [path, sink] : data_sinks_) {
-        EXPECT(
-          finalize_sink(std::move(sink)), "Failed to finalize sink at ", path);
-    }
-    data_sinks_.clear();
+    shards_.clear();
 }
 
 size_t
