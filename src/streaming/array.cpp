@@ -89,6 +89,7 @@ zarr::Array::Array(std::shared_ptr<ArrayConfig> config,
                    std::shared_ptr<FileHandlePool> file_handle_pool,
                    std::shared_ptr<S3ConnectionPool> s3_connection_pool)
   : ArrayBase(config, thread_pool, file_handle_pool, s3_connection_pool)
+  , chunk_mutexes_(config->dimensions->number_of_chunks_in_memory())
   , max_bytes_(config->dimensions->max_byte_count())
   , bytes_per_frame_(bytes_of_frame(*config->dimensions, config->dtype))
   , total_bytes_written_{ 0 }
@@ -161,10 +162,6 @@ zarr::Array::write_frame(LockedBuffer& data, size_t& bytes_written)
     if (max_bytes_ > 0 && total_bytes_written_ + nbytes_data > max_bytes_) {
         LOG_ERROR("Unable to write. Data would exceed bounds of array.");
         return WriteResult::OutOfBounds;
-    }
-
-    if (bytes_to_flush_ == 0) { // first frame, we need to init the buffers
-        fill_buffers_();
     }
 
     // split the incoming frame into tiles and write them to the chunk
@@ -430,19 +427,6 @@ zarr::Array::make_data_sink_(std::string_view path) const
     return sink;
 }
 
-void
-zarr::Array::fill_buffers_()
-{
-    LOG_DEBUG("Filling chunk buffers");
-
-    const size_t bytes_per_chunk = config_->dimensions->bytes_per_chunk();
-    const size_t bytes_per_px = bytes_of_type(config_->dtype);
-
-    for (auto& chunk : chunks_) {
-        chunk = std::make_shared<Chunk>(bytes_per_chunk, bytes_per_px);
-    }
-}
-
 namespace {
 /**
  * @brief Transpose a 2D frame buffer (Y×X → X×Y).
@@ -473,7 +457,7 @@ transpose_frame(const uint8_t* src,
 } // namespace
 
 size_t
-zarr::Array::write_frame_to_chunks_(LockedBuffer& data) const
+zarr::Array::write_frame_to_chunks_(LockedBuffer& data)
 {
     // break the frame into tiles and write them to the chunk buffers
     const auto bytes_per_px = bytes_of_type(config_->dtype);
@@ -548,6 +532,13 @@ zarr::Array::write_frame_to_chunks_(LockedBuffer& data) const
     for (auto tile_idx = 0; tile_idx < n_tiles; ++tile_idx) {
         auto& tile = tiles[tile_idx];
         auto& chunk = chunks_[tile_idx + group_offset];
+        {
+            std::unique_lock lock(chunk_mutexes_[tile_idx + group_offset]);
+            if (chunk == nullptr) {
+                chunk = std::make_shared<Chunk>(bytes_per_chunk, bytes_per_px);
+            }
+        }
+
         const auto* data_ptr = frame.data();
         const auto data_size = frame.size();
 
@@ -671,19 +662,11 @@ zarr::Array::compress_and_flush_data_()
     const auto n_shards = dims->number_of_shards();
     CHECK(shards_.size() == n_shards);
 
-    const auto chunks_in_memory = chunks_.size();
-    const auto n_layers = dims->chunk_layers_per_shard();
-    CHECK(n_layers > 0);
-
-    const auto chunk_group_offset = current_layer_ * chunks_in_memory;
-
-    auto write_table = is_closing_ || should_rollover_();
-
-    const auto bucket_name = config_->bucket_name;
-    auto connection_pool = s3_connection_pool_;
-
     const auto chunks_in_mem = dims->number_of_chunks_in_memory();
     const auto chunk_offset = current_layer_ * chunks_in_mem;
+
+    const size_t bytes_per_chunk = config_->dimensions->bytes_per_chunk();
+    const size_t bytes_per_px = bytes_of_type(config_->dtype);
 
     // wait for the chunks in each shard to finish compressing, then defragment
     // and write the shard
@@ -692,12 +675,12 @@ zarr::Array::compress_and_flush_data_()
         const auto chunk_indices_this_layer =
           dims->chunk_indices_for_shard_layer(shard_idx, current_layer_);
 
-        // skip any chunks
-        const auto chunks_to_skip =
+        // skip empty chunks
+        const auto empty_chunks =
           dims->skipped_internal_indices_for_shard_layer(shard_idx,
                                                          current_layer_);
 
-        for (const auto& internal_idx : chunks_to_skip) {
+        for (const auto& internal_idx : empty_chunks) {
             write_counter_.fetch_add(1);
             write_counter_cv_.notify_all();
 
@@ -733,6 +716,10 @@ zarr::Array::compress_and_flush_data_()
             auto job = [this,
                         shard,
                         internal_idx,
+                        chunk_idx,
+                        chunk_offset,
+                        bytes_per_chunk,
+                        bytes_per_px,
                         chunk = std::move(chunk),
                         params =
                           config_->compression_params](std::string& err) {
@@ -742,6 +729,17 @@ zarr::Array::compress_and_flush_data_()
                 size_t retry = 0;
 
                 try {
+                    // reset chunk
+                    {
+                        std::unique_lock lock(
+                          chunk_mutexes_[chunk_idx - chunk_offset]);
+                        if (!chunks_[chunk_idx - chunk_offset]) {
+                            chunks_[chunk_idx - chunk_offset] =
+                              std::make_shared<Chunk>(bytes_per_chunk,
+                                                      bytes_per_px);
+                        }
+                    }
+
                     do {
                         if (shard->compress_and_write_chunk(
                               internal_idx, chunk, params)) {
@@ -777,26 +775,13 @@ zarr::Array::compress_and_flush_data_()
         }
     }
 
-    // wait for all threads to finish
-    // for (auto& future : futures) {
-    //     future.wait();
-    // }
-
     // reset shard tables and file offsets
-    if (write_table) {
-        // for (auto& table : shard_tables_) {
-        //     std::fill(
-        //       table.begin(), table.end(),
-        //       std::numeric_limits<uint64_t>::max());
-        // }
-        //
-        // std::fill(shard_file_offsets_.begin(), shard_file_offsets_.end(), 0);
+    if (should_rollover_()) {
         current_layer_ = 0;
     } else {
         ++current_layer_;
     }
 
-    // return static_cast<bool>(all_successful);
     return true;
 }
 

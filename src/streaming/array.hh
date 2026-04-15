@@ -28,8 +28,9 @@ class Array : public ArrayBase
 
   protected:
     std::vector<std::shared_ptr<Chunk>> chunks_;
-    std::vector<std::shared_ptr<Shard>> shards_;
+    std::vector<std::mutex> chunk_mutexes_;
 
+    std::vector<std::shared_ptr<Shard>> shards_;
     std::mutex shards_mutex_;
 
     std::atomic<size_t> write_counter_;
@@ -58,12 +59,11 @@ class Array : public ArrayBase
     void make_shards_();
     [[nodiscard]] std::unique_ptr<Sink> make_data_sink_(
       std::string_view path) const;
-    void fill_buffers_();
 
     bool should_flush_() const;
     bool should_rollover_() const;
 
-    size_t write_frame_to_chunks_(LockedBuffer& data) const;
+    size_t write_frame_to_chunks_(LockedBuffer& data);
 
     [[nodiscard]] ByteVector consolidate_chunks_(uint32_t shard_index);
     [[nodiscard]] bool compress_and_flush_data_();
