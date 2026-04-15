@@ -519,7 +519,7 @@ def visualize(runs: list[dict], summary: dict, output_prefix: str = "results") -
         ax.set_xticklabels(run_labels, rotation=45 if n_runs > 10 else 0)
 
     ax.axhline(1.0, color="black", linestyle="--", linewidth=0.8, label="Parity (1.0)")
-    ax.set_title("TS / AZ Time Ratio (lower = AZ faster)")
+    ax.set_title("TS / AZ Time Ratio (higher = AZ faster)")
     ax.legend()
 
     fig.tight_layout()

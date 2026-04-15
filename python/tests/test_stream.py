@@ -29,7 +29,6 @@ from acquire_zarr import (
     S3Settings,
     Dimension,
     DimensionType,
-    ZarrVersion,
     LogLevel,
     DownsamplingMethod,
     Plate,
