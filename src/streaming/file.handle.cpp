@@ -4,7 +4,7 @@
 #include <chrono>
 
 void*
-init_handle(const std::string& filename, void* flags);
+init_handle(const std::string& filename, const void* flags);
 
 void
 destroy_handle(void* handle);
@@ -15,9 +15,17 @@ flush_file(void* handle);
 uint64_t
 get_max_active_handles();
 
-zarr::FileHandle::FileHandle(const std::string& filename, void* flags)
-  : handle_(init_handle(filename, flags))
+void*
+make_flags();
+
+void
+destroy_flags(const void*);
+
+zarr::FileHandle::FileHandle(const std::string& filename)
 {
+    const void* flags = make_flags();
+    handle_ = init_handle(filename, flags);
+    destroy_flags(flags);
 }
 
 zarr::FileHandle::~FileHandle()
@@ -33,32 +41,77 @@ zarr::FileHandle::get() const
 
 zarr::FileHandlePool::FileHandlePool()
   : max_active_handles_(get_max_active_handles())
-  , n_active_handles_(0)
 {
 }
 
-std::unique_ptr<zarr::FileHandle>
-zarr::FileHandlePool::get_handle(const std::string& filename, void* flags)
+zarr::BorrowedHandle::~BorrowedHandle()
+{
+    if (pool_ && handle_) {
+        pool_->return_handle(filename_);
+    }
+}
+
+zarr::BorrowedHandle
+zarr::FileHandlePool::get_handle(const std::string& filename)
 {
     std::unique_lock lock(mutex_);
-    if (n_active_handles_ >= max_active_handles_) {
-        cv_.wait(lock,
-                 [this]() { return n_active_handles_ < max_active_handles_; });
-    }
-    ++n_active_handles_;
 
-    return std::make_unique<FileHandle>(filename, flags);
+    // block until we can either serve from cache or evict something
+    cv_.wait(lock, [&] {
+        return cache_.contains(filename) ||
+               cache_.size() < max_active_handles_ || evict_lru_();
+    });
+
+    auto it = cache_.find(filename);
+    if (it == cache_.end()) {
+        // not in cache, open a new handle
+        lru_order_.push_front(filename);
+        auto [new_it, _] =
+          cache_.emplace(filename,
+                         CacheEntry{
+                           .handle = std::make_shared<FileHandle>(filename),
+                           .lru_it = lru_order_.begin(),
+                           .refcount = 0,
+                         });
+        it = new_it;
+    } else {
+        // move to front of LRU
+        lru_order_.splice(lru_order_.begin(), lru_order_, it->second.lru_it);
+        it->second.lru_it = lru_order_.begin();
+    }
+
+    ++it->second.refcount;
+    return BorrowedHandle(it->second.handle.get(), filename, this);
 }
 
 void
-zarr::FileHandlePool::return_handle(std::unique_ptr<FileHandle>&& handle)
+zarr::FileHandlePool::return_handle(const std::string& filename)
 {
     std::unique_lock lock(mutex_);
 
-    if (handle != nullptr && n_active_handles_ > 0) {
-        --n_active_handles_;
+    const auto it = cache_.find(filename);
+    if (it == cache_.end()) {
+        return;
     }
 
-    // handle will be destroyed when going out of scope
-    flush_file(handle->get());
+    if (it->second.refcount > 0) {
+        --it->second.refcount;
+    }
+
+    cv_.notify_all();
+}
+
+bool
+zarr::FileHandlePool::evict_lru_()
+{
+    // iterate from back (least recent) looking for idle handle
+    for (auto it = lru_order_.rbegin(); it != lru_order_.rend(); ++it) {
+        auto cache_it = cache_.find(*it);
+        if (cache_it != cache_.end() && cache_it->second.refcount == 0) {
+            cache_.erase(cache_it); // destroys FileHandle -> flush_file
+            lru_order_.erase(std::next(it).base());
+            return true;
+        }
+    }
+    return false;
 }

@@ -24,9 +24,9 @@ make_flags()
 }
 
 void
-destroy_flags(void* flags)
+destroy_flags(const void* flags)
 {
-    const auto* fd = static_cast<int*>(flags);
+    const auto* fd = static_cast<const int*>(flags);
     delete fd;
 }
 
@@ -42,11 +42,11 @@ get_max_active_handles()
 }
 
 void*
-init_handle(const std::string& filename, void* flags)
+init_handle(const std::string& filename, const void* flags)
 {
     auto* fd = new int;
 
-    *fd = open(filename.data(), *static_cast<int*>(flags), 0644);
+    *fd = open(filename.data(), *static_cast<const int*>(flags), 0644);
     if (*fd < 0) {
         const auto err = get_last_error_as_string();
         delete fd;

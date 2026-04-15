@@ -1,9 +1,10 @@
 #pragma once
 
 #include <condition_variable>
-#include <memory> // for std::unique_ptr
+#include <list>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 
 namespace zarr {
 /**
@@ -14,27 +15,45 @@ namespace zarr {
 class FileHandle
 {
   public:
-    /**
-     * @brief Create a new FileHandle. The file is opened with the specified
-     * filename and flags.
-     * @details The flags parameter is platform-specific and should be created
-     * using the appropriate function for the platform (e.g., make_flags()).
-     * The FileHandle will be closed when the object is destroyed.
-     * @param filename The path to the file to open.
-     * @param flags Platform-specific flags for opening the file.
-     * @throws std::runtime_error if the file cannot be opened.
-     */
-    FileHandle(const std::string& filename, void* flags);
-    ~FileHandle();
+    explicit FileHandle(const std::string& filename);
+    ~FileHandle(); // calls flush_file
 
-    /**
-     * @brief Get the underlying platform-specific file handle.
-     * @return A pointer to the platform-specific file handle.
-     */
     void* get() const;
 
+    // not copyable or movable
+    FileHandle(const FileHandle&) = delete;
+    FileHandle& operator=(const FileHandle&) = delete;
+    FileHandle(FileHandle&&) = delete;
+    FileHandle& operator=(FileHandle&&) = delete;
+
   private:
-    void* handle_; /**< Platform-specific file handle. */
+    void* handle_;
+};
+
+class FileHandlePool; // forward decl
+
+struct BorrowedHandle
+{
+    BorrowedHandle() = default;
+    BorrowedHandle(FileHandle* handle,
+                   std::string filename,
+                   FileHandlePool* pool)
+      : handle_(handle)
+      , filename_(std::move(filename))
+      , pool_(pool)
+    {
+    }
+    ~BorrowedHandle(); // calls pool_->return_handle(filename_)
+
+    // movable, not copyable
+    BorrowedHandle(const BorrowedHandle&) = delete;
+    BorrowedHandle& operator=(const BorrowedHandle&) = delete;
+    BorrowedHandle(BorrowedHandle&&) = default;
+    BorrowedHandle& operator=(BorrowedHandle&&) = default;
+
+    FileHandle* handle_ = nullptr;
+    std::string filename_;
+    FileHandlePool* pool_ = nullptr;
 };
 
 /**
@@ -46,29 +65,26 @@ class FileHandlePool
     FileHandlePool();
     ~FileHandlePool() = default;
 
-    /**
-     * @brief Get a file handle for the specified filename.
-     * This function will block if the maximum number of active handles has
-     * been reached, until a handle is returned to the pool.
-     * @param filename The path to the file to open.
-     * @param flags Platform-specific flags for opening the file.
-     * @return A unique pointer to a FileHandle, or nullptr on failure.
-     */
-    std::unique_ptr<FileHandle> get_handle(const std::string& filename,
-                                           void* flags);
-
-    /**
-     * @brief Return a file handle to the pool.
-     * @details This function should be called when a file handle is no longer
-     * needed, to allow other threads to acquire a handle.
-     * @param handle The file handle to return.
-     */
-    void return_handle(std::unique_ptr<FileHandle>&& handle);
+    BorrowedHandle get_handle(const std::string& filename);
+    void return_handle(const std::string& filename);
 
   private:
+    struct CacheEntry
+    {
+        std::shared_ptr<FileHandle> handle;
+        std::list<std::string>::iterator lru_it;
+        uint32_t refcount = 0;
+    };
+
     const uint64_t max_active_handles_;
-    std::atomic<uint64_t> n_active_handles_;
+    std::list<std::string> lru_order_; // front = most recent
+    std::unordered_map<std::string, CacheEntry> cache_;
     std::mutex mutex_;
     std::condition_variable cv_;
+
+    // Evicts the least recently used handle with refcount == 0.
+    // Returns false if no idle handle exists.
+    // Must be called with mutex_ held.
+    bool evict_lru_();
 };
 } // namespace zarr

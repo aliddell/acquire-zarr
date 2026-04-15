@@ -43,9 +43,9 @@ make_flags()
 }
 
 void
-destroy_flags(void* flags)
+destroy_flags(const void* flags)
 {
-    const auto* fd = static_cast<DWORD*>(flags);
+    const auto* fd = static_cast<const DWORD*>(flags);
     delete fd;
 }
 
@@ -56,7 +56,7 @@ get_max_active_handles()
 }
 
 void*
-init_handle(const std::string& filename, void* flags)
+init_handle(const std::string& filename, const void* flags)
 {
     auto* fd = new HANDLE;
     *fd = CreateFileA(filename.c_str(),
@@ -64,7 +64,7 @@ init_handle(const std::string& filename, void* flags)
                       0, // No sharing
                       nullptr,
                       OPEN_ALWAYS,
-                      *static_cast<DWORD*>(flags),
+                      *static_cast<const DWORD*>(flags),
                       nullptr);
 
     if (*fd == INVALID_HANDLE_VALUE) {

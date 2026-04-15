@@ -13,7 +13,7 @@ class FileSink : public Sink
   public:
     FileSink(std::string_view filename,
              std::shared_ptr<FileHandlePool> file_handle_pool);
-    ~FileSink() override;
+    ~FileSink() override = default;
 
     bool write(size_t offset, ConstByteSpan data) override;
 
@@ -23,10 +23,6 @@ class FileSink : public Sink
   private:
     std::shared_ptr<FileHandlePool> file_handle_pool_;
 
-    std::mutex mutex_;
-    std::unique_ptr<FileHandle> handle_;
-
     std::string filename_;
-    void* flags_;
 };
 } // namespace zarr
