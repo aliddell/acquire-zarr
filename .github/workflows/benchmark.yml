@@ -67,43 +67,14 @@ jobs:
         run: python -m pip install ".[testing]"
 
       - name: Run benchmark
-        run: python benchmarks/benchmark.py --nocompare --output benchmark-${{ matrix.platform }}-${{ github.sha }}.json
+        run: python benchmarks/benchmark.py --nocompare --output benchmark-${{ matrix.platform }}-${{ github.sha }}.json --num-runs 3
+
+      - name: Package artifacts
+        run: tar -cvzf benchmark-results-${{ matrix.platform }}-${{ github.sha }}.tar.gz benchmark-${{ matrix.platform }}-${{ github.sha }}.json benchmark-${{ matrix.platform }}-${{ github.sha }}_viz.png
+        shell: bash
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-${{ matrix.platform }}-${{ github.sha }}
           path: benchmark-${{ matrix.platform }}-${{ github.sha }}.json
-
-  generate-plots:
-    name: Generate benchmark plots
-    needs: run-benchmark
-    runs-on: ubuntu-latest
-    if: always()  # Run even if some benchmark jobs fail
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python 3.13
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13.3"
-
-      - name: Install plotting dependencies
-        run: pip install matplotlib click
-
-      - name: Download all benchmark artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: benchmark-*
-          path: benchmark-results
-          merge-multiple: true
-
-      - name: Generate plots
-        run: python benchmarks/plot_benchmarks.py --input-dir benchmark-results --output-prefix benchmark_comparison
-
-      - name: Upload plot
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-plots-${{ github.sha }}
-          path: benchmark_comparison_*.png

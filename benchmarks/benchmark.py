@@ -526,7 +526,6 @@ def visualize(runs: list[dict], summary: dict, output_prefix: str = "results") -
     plot_path = f"{output_prefix}_viz.png"
     fig.savefig(plot_path, dpi=150)
     print(f"Plot saved to {plot_path}")
-    plt.show()
 
 
 @click.command()
