@@ -16,7 +16,7 @@ class FileHandle
 {
   public:
     explicit FileHandle(const std::string& filename);
-    ~FileHandle(); // calls flush_file
+    ~FileHandle(); // calls destroy_handle
 
     void* get() const;
 

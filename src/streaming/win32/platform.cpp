@@ -61,7 +61,7 @@ init_handle(const std::string& filename, const void* flags)
     auto* fd = new HANDLE;
     *fd = CreateFileA(filename.c_str(),
                       GENERIC_WRITE,
-                      0, // No sharing
+                      FILE_SHARE_WRITE,
                       nullptr,
                       OPEN_ALWAYS,
                       *static_cast<const DWORD*>(flags),
