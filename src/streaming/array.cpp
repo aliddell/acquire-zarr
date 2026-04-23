@@ -647,7 +647,6 @@ bool
 zarr::Array::compress_and_flush_data_()
 {
     // construct paths to shard sinks if they don't already exist
-    LOG_DEBUG("Compressing and flushing");
     if (data_paths_.empty()) {
         make_shards_();
     }
@@ -776,7 +775,6 @@ zarr::Array::compress_and_flush_data_()
     } else {
         ++current_layer_;
     }
-    LOG_DEBUG("Compress and flush jobs submitted");
 
     return true;
 }
@@ -822,8 +820,6 @@ zarr::Array::rollover_()
     } else {
         data_root_ = node_path_() + "/c/" + std::to_string(append_chunk_index_);
     }
-
-    LOG_DEBUG("Done rolling over");
 }
 
 void

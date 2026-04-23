@@ -1587,8 +1587,8 @@ ZarrStream_s::init_frame_queue_()
         frame_size_bytes = std::max(frame_size_bytes, output.frame_size_bytes);
     }
 
-    // cap the frame buffer at 1 GiB, or 10 frames, whichever is larger
-    constexpr auto buffer_size_bytes = 1ULL << 30;
+    // cap the frame buffer at 2 GiB, or 10 frames, whichever is larger
+    constexpr auto buffer_size_bytes = 2ULL << 30;
     const auto frame_count =
       std::max(10ULL, buffer_size_bytes / frame_size_bytes);
 
@@ -1662,7 +1662,7 @@ ZarrStream_s::process_frame_queue_()
             frame_queue_finished_cv_.notify_all();
             return;
         } else {
-            auto& output_node = it->second;
+            const auto& output_node = it->second;
 
             size_t n_bytes;
             if (const auto result =
