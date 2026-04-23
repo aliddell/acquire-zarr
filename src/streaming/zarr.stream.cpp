@@ -1670,30 +1670,27 @@ ZarrStream_s::process_frame_queue_()
         } else {
             const auto& output_node = it->second;
 
-            size_t n_bytes;
-            bool write_ok = false;
-            std::string err_msg;
-            try {
-                const auto result =
-                  output_node.array->write_frame(frame, n_bytes);
-                if (result != zarr::WriteResult::Ok) {
-                    // TODO (aliddell): retry on WriteResult::PartialWrite
-                    err_msg = "Failed to write frame to writer for key: " +
-                              output_key;
-                } else {
-                    write_ok = true;
-                }
-            } catch (const std::exception& exc) {
-                // A failed compress/flush inside write_frame throws via
-                // CHECK(); surface it back to the user so the next append()
-                // sees the error instead of the failure being swallowed.
-                err_msg = "Exception while writing frame for key '" +
-                          output_key + "': " + exc.what();
-            }
+            // try this as a thread job
+            auto job = [this,
+                        output_key,
+                        array = output_node.array.get(),
+                        frame = std::move(frame)](std::string& err) mutable {
+                bool res = false;
+                try {
+                    size_t n_bytes;
+                    res = array->write_frame(frame, n_bytes) ==
+                          zarr::WriteResult::Ok;
 
-            if (!write_ok) {
-                set_error_(err_msg);
-                {
+                    if (!res) {
+                        err = "Failed to write frame to writer for key: " +
+                              output_key;
+                    }
+                } catch (const std::exception& exc) {
+                    err = "Failed to write frame to writer for key '" +
+                          output_key + "': " + exc.what();
+                }
+
+                if (!res) {
                     std::unique_lock lock(frame_queue_mutex_);
                     process_frames_ = false;
                     frame_queue_->clear();
@@ -1701,7 +1698,18 @@ ZarrStream_s::process_frame_queue_()
                     frame_queue_empty_cv_.notify_all();
                     frame_queue_finished_cv_.notify_all();
                 }
-                return;
+
+                return res;
+            };
+
+            // one thread is reserved for processing the frame queue and
+            // runs the entire lifetime of the stream
+            if (thread_pool_->n_threads() == 1 ||
+                !thread_pool_->push_job(job)) {
+                if (std::string err; !job(err)) {
+                    // signals are sent in the job
+                    LOG_ERROR(err);
+                }
             }
         }
 

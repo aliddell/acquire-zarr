@@ -164,6 +164,8 @@ zarr::Array::write_frame(std::vector<uint8_t>& frame, size_t& bytes_written)
         return WriteResult::OutOfBounds;
     }
 
+    std::unique_lock lock(frames_mutex_);
+
     // split the incoming frame into tiles and write them to the chunk
     // buffers
     bytes_written = write_frame_to_chunks_(frame);

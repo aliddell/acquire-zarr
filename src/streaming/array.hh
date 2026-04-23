@@ -26,6 +26,8 @@ class Array : public ArrayBase
     size_t max_bytes() const override;
 
   protected:
+    std::mutex frames_mutex_;
+
     std::vector<std::shared_ptr<Chunk>> chunks_;
     std::vector<std::mutex> chunk_mutexes_;
 
