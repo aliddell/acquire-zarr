@@ -137,7 +137,7 @@ main()
               nullptr);
 
             const size_t frame_size = array_width * array_height * nbytes_px;
-            zarr::LockedBuffer data(std::move(ByteVector(frame_size, 1)));
+            std::vector<uint8_t> data(frame_size, 1);
 
             for (auto i = 0; i < n_frames; ++i) { // 2 time points
                 size_t bytes_out;

@@ -68,9 +68,8 @@ make_array()
 [[nodiscard]] bool
 try_append_beyond_bounds(zarr::Array& array)
 {
-    zarr::LockedBuffer frame(std::move(
-      std::vector<uint8_t>(array_height * array_width * sizeof(uint16_t), 1)));
-
+    std::vector<uint8_t> frame(array_height * array_width * sizeof(uint16_t),
+                               1);
     size_t bytes_out;
 
     // append to full

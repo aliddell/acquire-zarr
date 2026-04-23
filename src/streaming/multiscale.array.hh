@@ -2,12 +2,9 @@
 
 #include "array.hh"
 #include "downsampler.hh"
-#include "sink.hh"
 #include "thread.pool.hh"
 
 #include <nlohmann/json.hpp>
-
-#include <optional>
 
 namespace zarr {
 class MultiscaleArray : public ArrayBase
@@ -20,7 +17,7 @@ class MultiscaleArray : public ArrayBase
 
     size_t memory_usage() const noexcept override;
 
-    [[nodiscard]] WriteResult write_frame(LockedBuffer& data,
+    [[nodiscard]] WriteResult write_frame(std::vector<uint8_t>& frame,
                                           size_t& bytes_written) override;
     size_t max_bytes() const override;
 
@@ -53,15 +50,15 @@ class MultiscaleArray : public ArrayBase
     [[nodiscard]] virtual nlohmann::json make_multiscales_metadata_() const;
 
     /** @brief Create a configuration for a full-resolution Array. */
-    std::shared_ptr<zarr::ArrayConfig> make_base_array_config_() const;
+    std::shared_ptr<ArrayConfig> make_base_array_config_() const;
 
     /**
      * @brief Add @p data to downsampler and write downsampled frames to
      * lower-resolution arrays.
-     * @param data The frame data to write.
+     * @param frame The frame data to write.
      * @return WriteResult::Ok if all levels are written successfully. otherwise
      * the WriteResult associated with the failure.
      */
-    WriteResult write_multiscale_frames_(LockedBuffer& data) const;
+    WriteResult write_multiscale_frames_(std::vector<uint8_t>& frame) const;
 };
 } // namespace zarr

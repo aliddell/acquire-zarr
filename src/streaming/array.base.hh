@@ -3,7 +3,6 @@
 #include "array.dimensions.hh"
 #include "compression.params.hh"
 #include "file.handle.hh"
-#include "locked.buffer.hh"
 #include "s3.connection.hh"
 #include "sink.hh"
 #include "thread.pool.hh"
@@ -88,23 +87,17 @@ class ArrayBase
     virtual size_t memory_usage() const noexcept = 0;
 
     /**
-     * @brief Close the node and flush any remaining data.
-     * @return True if the node was closed successfully, false otherwise.
-     */
-    [[nodiscard]] virtual bool close_() = 0;
-
-    /**
      * @brief Write a buffer of data to the node.
-     * @param data The data to write.
+     * @param frame The data to write. If an X-Y transpose is indicated in
+     * configuration, this transposes the frame.
      * @param bytes_written Set to the number of bytes written on success, or 0
      * on failure. Implementations MUST set this before returning.
      * @return WriteResult::Ok on success, WriteResult::PartialWrite if @p data
      * does not constitute a complete chunk, or WriteResult::OutOfBounds if
-     * writing
-     * @p data would exceed the declared array bounds. No data is written in the
-     * OutOfBounds case.
+     * writing @p data would exceed the declared array bounds. No data is
+     * written in the OutOfBounds case.
      */
-    [[nodiscard]] virtual WriteResult write_frame(LockedBuffer& data,
+    [[nodiscard]] virtual WriteResult write_frame(std::vector<uint8_t>& frame,
                                                   size_t& bytes_written) = 0;
 
     /**
@@ -129,6 +122,12 @@ class ArrayBase
     [[nodiscard]] virtual bool make_metadata_(nlohmann::json& metadata) = 0;
     [[nodiscard]] bool make_metadata_sink_();
     [[nodiscard]] bool write_metadata_();
+
+    /**
+     * @brief Close the node and flush any remaining data.
+     * @return True if the node was closed successfully, false otherwise.
+     */
+    [[nodiscard]] virtual bool close_() = 0;
 
     friend bool finalize_array(std::unique_ptr<ArrayBase>&& array);
 };

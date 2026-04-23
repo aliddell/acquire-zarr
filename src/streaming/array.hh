@@ -4,7 +4,6 @@
 #include "chunk.hh"
 #include "definitions.hh"
 #include "file.sink.hh"
-#include "locked.buffer.hh"
 #include "s3.connection.hh"
 #include "shard.hh"
 #include "thread.pool.hh"
@@ -22,7 +21,7 @@ class Array : public ArrayBase
 
     size_t memory_usage() const noexcept override;
 
-    [[nodiscard]] WriteResult write_frame(LockedBuffer&,
+    [[nodiscard]] WriteResult write_frame(std::vector<uint8_t>& frame,
                                           size_t& bytes_written) override;
     size_t max_bytes() const override;
 
@@ -63,7 +62,7 @@ class Array : public ArrayBase
     bool should_flush_() const;
     bool should_rollover_() const;
 
-    size_t write_frame_to_chunks_(LockedBuffer& data);
+    size_t write_frame_to_chunks_(std::vector<uint8_t>& frame);
 
     [[nodiscard]] ByteVector consolidate_chunks_(uint32_t shard_index);
     [[nodiscard]] bool compress_and_flush_data_();

@@ -141,11 +141,11 @@ zarr::Array::memory_usage() const noexcept
 }
 
 zarr::WriteResult
-zarr::Array::write_frame(LockedBuffer& data, size_t& bytes_written)
+zarr::Array::write_frame(std::vector<uint8_t>& frame, size_t& bytes_written)
 {
     bytes_written = 0;
 
-    const auto nbytes_data = data.size();
+    const auto nbytes_data = frame.size();
     const auto nbytes_frame =
       bytes_of_frame(*config_->dimensions, config_->dtype);
 
@@ -166,7 +166,7 @@ zarr::Array::write_frame(LockedBuffer& data, size_t& bytes_written)
 
     // split the incoming frame into tiles and write them to the chunk
     // buffers
-    bytes_written = write_frame_to_chunks_(data);
+    bytes_written = write_frame_to_chunks_(frame);
     CHECK(bytes_written <= nbytes_data);
 
     LOG_DEBUG(
@@ -184,8 +184,8 @@ zarr::Array::write_frame(LockedBuffer& data, size_t& bytes_written)
         bytes_to_flush_ = 0;
     }
 
-    return bytes_written == data.size() ? WriteResult::Ok
-                                        : WriteResult::PartialWrite;
+    return bytes_written == frame.size() ? WriteResult::Ok
+                                         : WriteResult::PartialWrite;
 }
 
 size_t
@@ -457,15 +457,12 @@ transpose_frame(const uint8_t* src,
 } // namespace
 
 size_t
-zarr::Array::write_frame_to_chunks_(LockedBuffer& data)
+zarr::Array::write_frame_to_chunks_(std::vector<uint8_t>& frame)
 {
     // break the frame into tiles and write them to the chunk buffers
     const auto bytes_per_px = bytes_of_type(config_->dtype);
 
     const auto& dimensions = config_->dimensions;
-
-    // Take the frame data first
-    auto frame = data.take();
 
     // Check if we need to transpose spatial dimensions (Y↔X)
     std::vector<uint8_t> transposed_frame;
@@ -585,9 +582,6 @@ zarr::Array::write_frame_to_chunks_(LockedBuffer& data)
         chunk->write_tile(chunk_offset, std::move(tile));
     }
 
-    // give the data back to the frame
-    data.assign(std::move(frame));
-
     return bytes_written;
 }
 
@@ -653,6 +647,7 @@ bool
 zarr::Array::compress_and_flush_data_()
 {
     // construct paths to shard sinks if they don't already exist
+    LOG_DEBUG("Compressing and flushing");
     if (data_paths_.empty()) {
         make_shards_();
     }
@@ -781,6 +776,7 @@ zarr::Array::compress_and_flush_data_()
     } else {
         ++current_layer_;
     }
+    LOG_DEBUG("Compress and flush jobs submitted");
 
     return true;
 }
@@ -826,6 +822,8 @@ zarr::Array::rollover_()
     } else {
         data_root_ = node_path_() + "/c/" + std::to_string(append_chunk_index_);
     }
+
+    LOG_DEBUG("Done rolling over");
 }
 
 void

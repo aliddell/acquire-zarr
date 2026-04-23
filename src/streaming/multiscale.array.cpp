@@ -55,18 +55,19 @@ zarr::MultiscaleArray::memory_usage() const noexcept
 }
 
 zarr::WriteResult
-zarr::MultiscaleArray::write_frame(LockedBuffer& data, size_t& bytes_written)
+zarr::MultiscaleArray::write_frame(std::vector<uint8_t>& frame,
+                                   size_t& bytes_written)
 {
     bytes_written = 0;
 
     size_t n_bytes;
-    if (const auto result = arrays_[0]->write_frame(data, n_bytes);
+    if (const auto result = arrays_[0]->write_frame(frame, n_bytes);
         result != WriteResult::Ok) {
         LOG_ERROR("Failed to write data to full-resolution array.");
         return result;
     }
 
-    write_multiscale_frames_(data);
+    write_multiscale_frames_(frame);
     return WriteResult::Ok;
 }
 
@@ -283,16 +284,17 @@ zarr::MultiscaleArray::make_base_array_config_() const
 }
 
 zarr::WriteResult
-zarr::MultiscaleArray::write_multiscale_frames_(LockedBuffer& data) const
+zarr::MultiscaleArray::write_multiscale_frames_(
+  std::vector<uint8_t>& frame) const
 {
     if (!downsampler_) {
         return WriteResult::Ok; // no downsampler, nothing to do
     }
 
-    downsampler_->add_frame(data);
+    downsampler_->add_frame(frame);
 
     for (auto i = 1; i < arrays_.size(); ++i) {
-        if (LockedBuffer downsampled_frame;
+        if (std::vector<uint8_t> downsampled_frame;
             downsampler_->take_frame(i, downsampled_frame)) {
 
             size_t n_bytes;

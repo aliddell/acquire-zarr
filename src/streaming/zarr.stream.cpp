@@ -118,10 +118,9 @@ validate_compression_settings(const ZarrCompressionSettings* settings,
                 return false;
             }
             if (settings->level > 9) {
-                error =
-                  "Invalid compression level: " +
-                  std::to_string(settings->level) +
-                  ". Blosc supports levels 0-9";
+                error = "Invalid compression level: " +
+                        std::to_string(settings->level) +
+                        ". Blosc supports levels 0-9";
                 return false;
             }
             if (settings->shuffle != BLOSC_NOSHUFFLE &&
@@ -142,10 +141,9 @@ validate_compression_settings(const ZarrCompressionSettings* settings,
                 return false;
             }
             if (settings->level > 22) {
-                error =
-                  "Invalid compression level: " +
-                  std::to_string(settings->level) +
-                  ". Zstd supports levels 0-22";
+                error = "Invalid compression level: " +
+                        std::to_string(settings->level) +
+                        ". Zstd supports levels 0-22";
                 return false;
             }
             if (settings->shuffle != 0) {
@@ -918,47 +916,50 @@ ZarrStream::append(const char* key_,
     }
 
     auto& output = array_it->second;
-    if (output.max_bytes > 0 &&
-        output.bytes_written + bytes_in > output.max_bytes) {
+    if (output.max_array_size_bytes > 0 &&
+        output.bytes_written + bytes_in > output.max_array_size_bytes) {
         LOG_ERROR("Incoming byte count ",
                   bytes_in,
                   " will overflow array (bytes written: ",
                   output.bytes_written,
                   ", maximum bytes: ",
-                  output.max_bytes,
+                  output.max_array_size_bytes,
                   ")");
         return ZarrStatusCode_WriteOutOfBounds;
     }
     auto& frame_buffer = output.frame_buffer;
     auto& frame_buffer_offset = output.frame_buffer_offset;
+    const size_t frame_size_bytes = output.frame_size_bytes;
+
+    if (frame_buffer.empty() && frame_buffer_offset > 0) {
+        set_error_("Corrupted frame buffer for key '" + key + "'");
+        return ZarrStatusCode_InternalError;
+    }
 
     auto* data = data_ ? static_cast<const uint8_t*>(data_) : nullptr;
-
-    const size_t bytes_of_frame = frame_buffer.size();
-
     while (bytes_out < bytes_in) {
         const size_t bytes_remaining = bytes_in - bytes_out;
 
         if (frame_buffer_offset > 0) { // add to / finish a partial frame
             const size_t bytes_to_copy =
-              std::min(bytes_of_frame - frame_buffer_offset, bytes_remaining);
+              std::min(frame_size_bytes - frame_buffer_offset, bytes_remaining);
 
-            const auto subspan =
-              data ? std::span{ data + bytes_out, bytes_to_copy }
-                   : std::span{ static_cast<const uint8_t*>(nullptr),
-                                bytes_to_copy };
-            frame_buffer.assign_at(frame_buffer_offset, subspan);
+            if (data) {
+                memcpy(frame_buffer.data() + frame_buffer_offset,
+                       data + bytes_out,
+                       bytes_to_copy);
+            }
+
             frame_buffer_offset += bytes_to_copy;
             bytes_out += bytes_to_copy;
 
             // ready to enqueue the frame buffer
-            if (frame_buffer_offset == bytes_of_frame) {
+            if (frame_buffer_offset == frame_size_bytes) {
                 std::unique_lock lock(frame_queue_mutex_);
                 while (!frame_queue_->push(frame_buffer, key) &&
                        process_frames_) {
                     frame_queue_not_full_cv_.wait(lock);
                 }
-                frame_buffer.resize(bytes_of_frame);
 
                 if (process_frames_) {
                     frame_queue_not_empty_cv_.notify_one();
@@ -969,13 +970,19 @@ ZarrStream::append(const char* key_,
                 data = data ? data + bytes_to_copy : data;
                 frame_buffer_offset = 0;
             }
-        } else if (bytes_remaining < bytes_of_frame) { // begin partial frame
-            frame_buffer.assign_at(0, { data, bytes_remaining });
+        } else if (bytes_remaining < frame_size_bytes) { // begin partial frame
+            if (frame_buffer.empty()) {
+                frame_buffer.resize(frame_size_bytes, 0);
+            }
+
+            if (data) {
+                memcpy(frame_buffer.data(), data, bytes_remaining);
+            }
+
             frame_buffer_offset = bytes_remaining;
             bytes_out += bytes_remaining;
         } else { // at least one full frame
-            zarr::LockedBuffer frame;
-            frame.assign({ data, bytes_of_frame });
+            std::span frame(data, frame_size_bytes);
 
             std::unique_lock lock(frame_queue_mutex_);
             while (!frame_queue_->push(frame, key) && process_frames_) {
@@ -989,8 +996,8 @@ ZarrStream::append(const char* key_,
                 break;
             }
 
-            bytes_out += bytes_of_frame;
-            data = data ? data + bytes_of_frame : data;
+            bytes_out += frame_size_bytes;
+            data = data ? data + frame_size_bytes : data;
         }
     }
     output.bytes_written += bytes_out;
@@ -1060,7 +1067,7 @@ ZarrStream_s::is_s3_acquisition_() const
 }
 
 bool
-ZarrStream_s::validate_settings_(const struct ZarrStreamSettings_s* settings)
+ZarrStream_s::validate_settings_(const ZarrStreamSettings* settings)
 {
     if (!settings) {
         error_ = "Null pointer: settings";
@@ -1250,15 +1257,12 @@ ZarrStream_s::configure_array_(const ZarrArraySettings* settings,
         return false;
     }
 
-    output_node.max_bytes = output_node.array->max_bytes();
+    output_node.max_array_size_bytes = output_node.array->max_bytes();
 
-    // initialize frame buffer
     const auto& dims = config->dimensions;
-    const auto frame_size_bytes = dims->width_dim().array_size_px *
-                                  dims->height_dim().array_size_px *
-                                  zarr::bytes_of_type(settings->data_type);
-
-    output_node.frame_buffer.resize_and_fill(frame_size_bytes, 0);
+    output_node.frame_size_bytes = dims->width_dim().array_size_px *
+                                   dims->height_dim().array_size_px *
+                                   zarr::bytes_of_type(settings->data_type);
     output_arrays_.emplace(output_node.output_key, std::move(output_node));
 
     return true;
@@ -1379,7 +1383,7 @@ ZarrStream_s::commit_hcs_settings_(const ZarrHCSSettings* hcs_settings)
 }
 
 bool
-ZarrStream_s::commit_settings_(const struct ZarrStreamSettings_s* settings)
+ZarrStream_s::commit_settings_(const ZarrStreamSettings* settings)
 {
     store_path_ = zarr::trim(settings->store_path);
 
@@ -1579,13 +1583,12 @@ ZarrStream_s::init_frame_queue_()
     }
 
     size_t frame_size_bytes = 0;
-    for (auto& [key, output] : output_arrays_) {
-        frame_size_bytes =
-          std::max(frame_size_bytes, output.frame_buffer.size());
+    for (const auto& output : output_arrays_ | std::views::values) {
+        frame_size_bytes = std::max(frame_size_bytes, output.frame_size_bytes);
     }
 
     // cap the frame buffer at 1 GiB, or 10 frames, whichever is larger
-    const auto buffer_size_bytes = 1ULL << 30;
+    constexpr auto buffer_size_bytes = 1ULL << 30;
     const auto frame_count =
       std::max(10ULL, buffer_size_bytes / frame_size_bytes);
 
@@ -1626,7 +1629,7 @@ ZarrStream_s::process_frame_queue_()
 
     std::string output_key;
 
-    zarr::LockedBuffer frame;
+    std::vector<uint8_t> frame;
     while (process_frames_ || !frame_queue_->empty()) {
         {
             std::unique_lock lock(frame_queue_mutex_);
@@ -1642,9 +1645,8 @@ ZarrStream_s::process_frame_queue_()
                 // done
                 if (!process_frames_) {
                     break;
-                } else {
-                    continue;
                 }
+                continue;
             }
         }
 
@@ -1718,7 +1720,7 @@ ZarrStream_s::finalize_frame_queue_()
 }
 
 bool
-finalize_stream(struct ZarrStream_s* stream)
+finalize_stream(ZarrStream* stream)
 {
     if (stream == nullptr) {
         LOG_INFO("Stream is null. Nothing to finalize.");

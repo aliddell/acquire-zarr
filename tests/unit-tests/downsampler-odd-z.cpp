@@ -3,7 +3,7 @@
 
 namespace {
 template<typename T>
-zarr::LockedBuffer
+std::vector<uint8_t>
 create_test_image(size_t width, size_t height, T value = 100)
 {
     ByteVector data(width * height * sizeof(T), 0);
@@ -13,7 +13,7 @@ create_test_image(size_t width, size_t height, T value = 100)
         typed_data[i] = value;
     }
 
-    return { std::move(data) };
+    return std::move(data);
 }
 
 void
@@ -25,45 +25,41 @@ check_downsample(zarr::Downsampler& downsampler, uint8_t frame_value)
     for (auto i = 0; i < 15; ++i) {
         downsampler.add_frame(first_timepoint);
         if (i % 2 == 1) {
-            zarr::LockedBuffer downsampled;
+            std::vector<uint8_t> downsampled;
             EXPECT(downsampler.take_frame(1, downsampled),
                    "Downsampled frame not found");
             ++n_downsampled;
 
-            downsampled.with_lock([frame_value](const ByteVector& data) {
-                for (auto j = 0; j < data.size(); ++j) {
-                    auto value = data[j];
-                    EXPECT(value == frame_value,
-                           "Downsampled value mismatch at timepoint ",
-                           j,
-                           ": expected ",
-                           frame_value,
-                           ", got ",
-                           value);
-                }
-            });
+            for (auto j = 0; j < downsampled.size(); ++j) {
+                auto value = downsampled[j];
+                EXPECT(value == frame_value,
+                       "Downsampled value mismatch at timepoint ",
+                       j,
+                       ": expected ",
+                       frame_value,
+                       ", got ",
+                       value);
+            }
         }
     }
 
     EXPECT(
       n_downsampled == 7, "Expected 7 downsampled frames, got ", n_downsampled);
 
-    zarr::LockedBuffer downsampled;
+    std::vector<uint8_t> downsampled;
     EXPECT(downsampler.take_frame(1, downsampled),
            "Downsampled frame not found after all frames added");
 
-    downsampled.with_lock([frame_value](const ByteVector& data) {
-        for (auto j = 0; j < data.size(); ++j) {
-            auto value = data[j];
-            EXPECT(value == frame_value,
-                   "Downsampled value mismatch at timepoint ",
-                   j,
-                   ": expected ",
-                   frame_value,
-                   ", got ",
-                   value);
-        }
-    });
+    for (auto j = 0; j < downsampled.size(); ++j) {
+        auto value = downsampled[j];
+        EXPECT(value == frame_value,
+               "Downsampled value mismatch at timepoint ",
+               j,
+               ": expected ",
+               frame_value,
+               ", got ",
+               value);
+    }
 }
 } // namespace
 
