@@ -61,6 +61,8 @@ zarr::MultiscaleArray::write_frame(std::vector<uint8_t>& frame,
     bytes_written = 0;
 
     size_t n_bytes;
+
+    std::unique_lock lock(frames_mutex_);
     if (const auto result = arrays_[0]->write_frame(frame, n_bytes);
         result != WriteResult::Ok) {
         LOG_ERROR("Failed to write data to full-resolution array.");

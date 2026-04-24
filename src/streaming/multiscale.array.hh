@@ -22,6 +22,8 @@ class MultiscaleArray : public ArrayBase
     size_t max_bytes() const override;
 
   protected:
+    std::mutex frames_mutex_;
+
     std::unique_ptr<Downsampler> downsampler_;
     std::vector<std::unique_ptr<Array>> arrays_;
 
@@ -56,6 +58,7 @@ class MultiscaleArray : public ArrayBase
      * @brief Add @p data to downsampler and write downsampled frames to
      * lower-resolution arrays.
      * @param frame The frame data to write.
+     * @param frame_id
      * @return WriteResult::Ok if all levels are written successfully. otherwise
      * the WriteResult associated with the failure.
      */

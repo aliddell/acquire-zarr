@@ -92,6 +92,7 @@ class ArrayBase
      * configuration, this transposes the frame.
      * @param bytes_written Set to the number of bytes written on success, or 0
      * on failure. Implementations MUST set this before returning.
+     * @param frame_id Index of the frame to write.
      * @return WriteResult::Ok on success, WriteResult::PartialWrite if @p data
      * does not constitute a complete chunk, or WriteResult::OutOfBounds if
      * writing @p data would exceed the declared array bounds. No data is
