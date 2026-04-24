@@ -1598,20 +1598,20 @@ ZarrStream_s::init_frame_queue_()
         frame_queue_ =
           std::make_unique<zarr::FrameQueue>(frame_count, frame_size_bytes);
 
-        auto job = [this](std::string& err) {
+        auto job = [this](std::string& err) -> zarr::ThreadPool::TaskResult {
             try {
                 process_frame_queue_();
             } catch (const std::exception& e) {
                 err = "Error processing frame queue: " + std::string(e.what());
                 set_error_(err);
 
-                return false;
+                return zarr::ThreadPool::TaskResult::Fatal;
             }
 
-            return true;
+            return zarr::ThreadPool::TaskResult::Success;
         };
 
-        EXPECT(thread_pool_->push_job(job),
+        EXPECT(thread_pool_->push_job_with_retry(job, 8),
                "Failed to push frame processing job to thread pool.");
     } catch (const std::exception& e) {
         set_error_("Error creating frame queue: " + std::string(e.what()));
@@ -1700,18 +1700,19 @@ ZarrStream_s::process_frame_queue_()
                     frame_queue_not_full_cv_.notify_all();
                     frame_queue_empty_cv_.notify_all();
                     frame_queue_finished_cv_.notify_all();
+                    return zarr::ThreadPool::TaskResult::Fatal;
                 }
 
-                return res;
+                return zarr::ThreadPool::TaskResult::Success;
             };
 
             // one thread is reserved for processing the frame queue and
             // runs the entire lifetime of the stream
             if (thread_pool_->n_threads() == 1 ||
                 !thread_pool_->push_job(job)) {
-                if (std::string err; !job(err)) {
+                if (!thread_pool_->execute_job_with_retry(job, 3)) {
                     // signals are sent in the job
-                    LOG_ERROR(err);
+                    LOG_ERROR("derp"); // TODO (aliddell): better msg
                 }
             }
         }

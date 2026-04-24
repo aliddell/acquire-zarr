@@ -680,25 +680,37 @@ zarr::Array::compress_and_flush_data_()
             write_counter_.fetch_add(1);
             write_counter_cv_.notify_all();
 
-            auto job = [this, shard, internal_idx](std::string& err) {
+            auto job = [this, shard, internal_idx](
+                         std::string& err) -> ThreadPool::TaskResult {
                 bool success = false;
+                ThreadPool::TaskResult result;
+
                 try {
                     success = shard->skip_chunk(internal_idx);
+                    if (success) {
+                        result = ThreadPool::TaskResult::Success;
+                    } else { // failed to write table
+                        result = ThreadPool::TaskResult::Failure;
+                    }
                 } catch (const std::exception& exc) {
                     err = std::string("Failed skipping chunk: ") + exc.what();
+                    result = ThreadPool::TaskResult::Fatal;
                 }
 
                 write_counter_.fetch_sub(1);
                 write_counter_cv_.notify_all();
-                return success;
+                return result;
             };
 
             // one thread is reserved for processing the frame queue and
             // runs the entire lifetime of the stream
             if (thread_pool_->n_threads() == 1 ||
                 !thread_pool_->push_job(job)) {
-                if (std::string err; !job(err)) {
-                    LOG_ERROR(err);
+                if (!thread_pool_->execute_job(std::move(job))) {
+                    LOG_ERROR("Failed to skip chunk ",
+                              internal_idx,
+                              " of shard ",
+                              shard_idx);
                 }
             }
         }
@@ -717,12 +729,11 @@ zarr::Array::compress_and_flush_data_()
                         bytes_per_chunk,
                         bytes_per_px,
                         chunk = std::move(chunk),
-                        params =
-                          config_->compression_params](std::string& err) {
-                bool success = false;
+                        params = config_->compression_params](
+                         std::string& err) -> ThreadPool::TaskResult {
+                ThreadPool::TaskResult result;
 
                 constexpr size_t n_retries = 3;
-                size_t retry = 0;
 
                 try {
                     // reset chunk
@@ -736,7 +747,8 @@ zarr::Array::compress_and_flush_data_()
                         }
                     }
 
-                    do {
+                    bool success = false;
+                    for (auto retry = 0; retry < n_retries; ++retry) {
                         if (shard->compress_and_write_chunk(
                               internal_idx, chunk, params)) {
                             success = true;
@@ -744,28 +756,32 @@ zarr::Array::compress_and_flush_data_()
                         }
 
                         std::this_thread::sleep_for(std::chrono::milliseconds(
-                          static_cast<int>(std::pow(10, ++retry))));
-                    } while (retry < n_retries);
+                          static_cast<int>(std::pow(10, retry))));
+                    }
+
+                    if (!success) {
+                        return ThreadPool::TaskResult::Retry;
+                    }
+                    result = ThreadPool::TaskResult::Success;
                 } catch (const std::exception& exc) {
                     err = std::string("Failed to write chunk: ") + exc.what();
-                }
-
-                if (!success && err.empty()) {
-                    err = "Failed to write chunk after " +
-                          std::to_string(n_retries) + " retries";
+                    result = ThreadPool::TaskResult::Fatal;
                 }
 
                 write_counter_.fetch_sub(1);
                 write_counter_cv_.notify_all();
-                return success;
+                return result;
             };
 
             // one thread is reserved for processing the frame queue and
             // runs the entire lifetime of the stream
             if (thread_pool_->n_threads() == 1 ||
                 !thread_pool_->push_job(job)) {
-                if (std::string err; !job(err)) {
-                    LOG_ERROR(err);
+                if (!thread_pool_->execute_job_with_retry(std::move(job), 2)) {
+                    LOG_ERROR("Failed to skip chunk ",
+                              internal_idx,
+                              " of shard ",
+                              shard_idx);
                 }
             }
         }

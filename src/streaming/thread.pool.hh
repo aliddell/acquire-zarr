@@ -12,7 +12,15 @@ namespace zarr {
 class ThreadPool
 {
   public:
-    using Task = std::function<bool(std::string&)>;
+    enum class TaskResult
+    {
+        Success,
+        Retry,   // requeue the job
+        Failure, // log + call error_handler_, continue pool
+        Fatal,   // log + call error_handler_, stop pool
+    };
+
+    using Task = std::function<TaskResult(std::string&)>;
     using ErrorCallback = std::function<void(const std::string&)>;
 
     // The error handler `err` is called when a job returns false. This
@@ -31,6 +39,17 @@ class ThreadPool
      * otherwise.
      */
     [[nodiscard]] bool push_job(Task&& job);
+
+    // TODO (aliddell: docstring)
+    [[nodiscard]] bool push_job_with_retry(Task&& job,
+                                           uint32_t max_retries = 3);
+
+    // TODO (aliddell: docstring)
+    [[nodiscard]] static bool execute_job(Task&& job);
+
+    // TODO (aliddell: docstring)
+    [[nodiscard]] static bool execute_job_with_retry(Task&& job,
+                                                     uint32_t max_retries = 3);
 
     /**
      * @brief Block until all jobs on the queue have processed, then spin down
@@ -59,7 +78,7 @@ class ThreadPool
 
     std::vector<std::string> error_messages_;
 
-    std::optional<ThreadPool::Task> pop_from_job_queue_() noexcept;
+    std::optional<Task> pop_from_job_queue_() noexcept;
     [[nodiscard]] bool should_stop_() const noexcept;
     void process_tasks_();
 };

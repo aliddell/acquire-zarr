@@ -1,3 +1,4 @@
+#include "logger.hh"
 #include "thread.pool.hh"
 
 #include <algorithm>
@@ -42,6 +43,60 @@ zarr::ThreadPool::push_job(Task&& job)
     jobs_cv_.notify_one();
 
     return true;
+}
+
+bool
+zarr::ThreadPool::push_job_with_retry(Task&& job, uint32_t max_retries)
+{
+    auto attempts = std::make_shared<uint32_t>(0);
+    return push_job([job = std::move(job), attempts, max_retries](
+                      std::string& err) mutable -> TaskResult {
+        const auto result = job(err);
+        if (result == TaskResult::Retry) {
+            if (++(*attempts) >= max_retries) {
+                err = "Max retries exceeded: " + err;
+                return TaskResult::Failure;
+            }
+        }
+        return result;
+    });
+}
+
+bool
+zarr::ThreadPool::execute_job(Task&& job)
+{
+    if (std::string err_msg; job(err_msg) != TaskResult::Success) {
+        LOG_ERROR(err_msg);
+        return false;
+    }
+
+    return true;
+}
+
+bool
+zarr::ThreadPool::execute_job_with_retry(Task&& job, uint32_t max_retries)
+{
+    std::string err_msg;
+
+    for (uint32_t retry = 0; retry < max_retries; ++retry) {
+
+        switch (job(err_msg)) {
+            case TaskResult::Success:
+                return true;
+            case TaskResult::Retry:
+            case TaskResult::Failure:
+                continue;
+            case TaskResult::Fatal:
+                LOG_ERROR("Error while executing job: ", err_msg);
+                return false;
+        }
+    }
+
+    LOG_ERROR("Failed to execute job after ",
+              max_retries,
+              " retries",
+              err_msg.empty() ? err_msg : ": " + err_msg);
+    return false;
 }
 
 void
@@ -99,9 +154,22 @@ zarr::ThreadPool::process_tasks_()
 
         if (auto job = pop_from_job_queue_(); job.has_value()) {
             lock.unlock();
-            if (std::string err_msg; !job.value()(err_msg)) {
-                error_messages_.push_back(err_msg);
-                error_handler_(err_msg);
+
+            switch (std::string err_msg; job.value()(err_msg)) {
+                case TaskResult::Success:
+                    break;
+                case TaskResult::Retry:
+                    push_job(std::move(job.value())); // requeue
+                    break;
+                case TaskResult::Failure:
+                    error_messages_.push_back(err_msg);
+                    error_handler_(err_msg);
+                    break;
+                case TaskResult::Fatal:
+                    error_messages_.push_back(err_msg);
+                    error_handler_(err_msg);
+                    accepting_jobs = false; // drain and stop
+                    break;
             }
         }
     }
