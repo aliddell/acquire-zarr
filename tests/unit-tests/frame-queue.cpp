@@ -22,15 +22,17 @@ test_basic_operations()
     }
 
     // Pushing
-    CHECK(queue.push(data, "foo"));
+    CHECK(queue.push(data, "foo", 32));
     CHECK(queue.size() == 1);
     CHECK(!queue.empty());
 
     // Popping
     std::vector<uint8_t> received_frame;
     std::string received_key;
-    CHECK(queue.pop(received_frame, received_key));
+    uint64_t frame_id;
+    CHECK(queue.pop(received_frame, received_key, frame_id));
     CHECK(received_frame.size() == 1024);
+    CHECK(frame_id == 32);
     CHECK(queue.size() == 0);
     CHECK(queue.empty());
 
@@ -49,28 +51,31 @@ test_capacity()
 
     // Fill the queue
     for (size_t i = 0; i < capacity; ++i) {
-        std::vector<uint8_t> frame(std::move(ByteVector(100, i)));
-        bool result = queue.push(frame, std::to_string(i));
+        std::vector<uint8_t> frame(100, i);
+        bool result = queue.push(frame, std::to_string(i), i);
         CHECK(result);
     }
 
     // Queue should be full (next push should fail)
-    std::vector<uint8_t> extra_frame(std::move(ByteVector(100)));
-    bool push_result = queue.push(extra_frame, std::to_string(capacity));
+    std::vector<uint8_t> extra_frame(100);
+    bool push_result =
+      queue.push(extra_frame, std::to_string(capacity), capacity);
     CHECK(!push_result);
     CHECK(queue.size() == capacity);
 
     // Remove one item
     std::vector<uint8_t> received_frame;
     std::string received_key;
-    bool pop_result = queue.pop(received_frame, received_key);
+    uint64_t frame_id;
+    bool pop_result = queue.pop(received_frame, received_key, frame_id);
     CHECK(pop_result);
     CHECK(queue.size() == capacity - 1);
     CHECK(received_key == "0");
+    CHECK(frame_id == 0);
 
     // Should be able to push again
-    std::vector<uint8_t> new_frame(std::move(ByteVector(100, 99)));
-    push_result = queue.push(new_frame, std::to_string(capacity));
+    std::vector<uint8_t> new_frame(100, 99);
+    push_result = queue.push(new_frame, std::to_string(capacity), 0);
     CHECK(push_result);
     CHECK(queue.size() == capacity);
 }
@@ -79,39 +84,39 @@ test_capacity()
 void
 test_producer_consumer()
 {
-    const size_t n_frames = 1000;
-    const size_t frame_size = 1024;
-    const size_t queue_capacity = 10;
+    constexpr size_t n_frames = 1000;
+    constexpr size_t frame_size = 1024;
+    constexpr size_t queue_capacity = 10;
 
     zarr::FrameQueue queue(queue_capacity, frame_size);
 
     // Producer thread
-    std::thread producer([&queue, n_frames, frame_size]() {
+    std::thread producer([&queue]() {
         for (size_t i = 0; i < n_frames; ++i) {
-            std::vector<uint8_t> frame(
-              std::move(ByteVector(frame_size, i % 256)));
+            std::vector<uint8_t> frame(frame_size, i % 256);
 
             // Try until successful
-            while (!queue.push(frame, "spam")) {
+            while (!queue.push(frame, "spam", i)) {
                 std::this_thread::sleep_for(std::chrono::microseconds(10));
             }
         }
     });
 
     // Consumer thread
-    std::thread consumer([&queue, n_frames]() {
+    std::thread consumer([&queue]() {
         size_t frames_received = 0;
 
+        std::vector<uint8_t> frame;
+        std::string received_key;
+        uint64_t frame_id;
         while (frames_received < n_frames) {
-            std::vector<uint8_t> frame;
-            std::string received_key;
-            if (queue.pop(frame, received_key)) {
+            if (queue.pop(frame, received_key, frame_id)) {
                 // Verify frame data (first byte should match frame number %
                 // 256)
                 CHECK(frame.size() > 0);
                 CHECK(frame[0] == frames_received % 256);
                 CHECK(received_key == "spam");
-                frames_received++;
+                CHECK(frame_id == frames_received++);
             } else {
                 std::this_thread::sleep_for(std::chrono::microseconds(10));
             }
@@ -144,12 +149,15 @@ test_throughput()
     constexpr size_t iterations = 100;
     std::vector<uint8_t> received_frame;
     std::string received_key;
+    uint64_t frame_id;
     for (size_t i = 0; i < iterations; ++i) {
-        CHECK(queue.push(large_frame, std::to_string(i)));
-        CHECK(queue.pop(received_frame, received_key));
+        CHECK(queue.push(large_frame, std::to_string(i), i));
+        CHECK(queue.pop(received_frame, received_key, frame_id));
         CHECK(received_frame.size() == frame_size);
         CHECK(received_key == std::to_string(i));
-        std::ranges::fill(large_frame, 42);
+        CHECK(frame_id == i);
+        // std::ranges::fill(large_frame, 42);
+        large_frame.resize(frame_size, i % 256 + 1);
     }
 
     auto end_time = std::chrono::high_resolution_clock::now();

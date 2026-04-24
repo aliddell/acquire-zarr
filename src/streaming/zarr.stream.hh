@@ -70,6 +70,7 @@ struct ZarrStream_s
         std::unique_ptr<zarr::ArrayBase> array;
         size_t max_array_size_bytes;
         size_t bytes_written;
+        uint64_t frames_written;
     };
 
     std::string error_; // error message. If nonempty, an error occurred.

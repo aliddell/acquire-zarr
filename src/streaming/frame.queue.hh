@@ -15,9 +15,11 @@ class FrameQueue
     explicit FrameQueue(size_t num_frames, size_t avg_frame_size);
     ~FrameQueue() = default;
 
-    bool push(const std::span<const uint8_t>& frame, const std::string& key);
+    bool push(const std::span<const uint8_t>& frame,
+              const std::string& key,
+              uint64_t frame_id);
 
-    bool pop(std::vector<uint8_t>& frame, std::string& key);
+    bool pop(std::vector<uint8_t>& frame, std::string& key_, uint64_t& frame_id_);
 
     size_t size() const;
     size_t bytes_used() const;
@@ -30,6 +32,7 @@ class FrameQueue
     {
         std::string key;
         std::vector<uint8_t> data;
+        uint64_t frame_id;
         std::atomic<bool> ready{ false };
     };
 

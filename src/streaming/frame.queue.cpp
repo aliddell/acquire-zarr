@@ -19,7 +19,9 @@ zarr::FrameQueue::FrameQueue(size_t num_frames, size_t avg_frame_size)
 }
 
 bool
-zarr::FrameQueue::push(const std::span<const uint8_t>& frame, const std::string& key)
+zarr::FrameQueue::push(const std::span<const uint8_t>& frame,
+                       const std::string& key_,
+                       uint64_t frame_id_)
 {
     std::unique_lock lock(mutex_);
     const size_t write_pos = write_pos_.load(std::memory_order_relaxed);
@@ -29,12 +31,14 @@ zarr::FrameQueue::push(const std::span<const uint8_t>& frame, const std::string&
         return false; // Queue is full
     }
 
-    buffer_[write_pos].key = key;
-    buffer_[write_pos].data.resize(frame.size(), 0);
+    auto& [key, data, frame_id, ready] = buffer_[write_pos];
+    key = key_;
+    data.resize(frame.size(), 0);
     if (frame.data()) {
-        memcpy(buffer_[write_pos].data.data(), frame.data(), frame.size());
+        memcpy(data.data(), frame.data(), frame.size());
     }
-    buffer_[write_pos].ready.store(true, std::memory_order_release);
+    frame_id = frame_id_;
+    ready.store(true, std::memory_order_release);
 
     write_pos_.store(next_pos, std::memory_order_release);
 
@@ -42,10 +46,12 @@ zarr::FrameQueue::push(const std::span<const uint8_t>& frame, const std::string&
 }
 
 bool
-zarr::FrameQueue::pop(std::vector<uint8_t>& frame, std::string& key)
+zarr::FrameQueue::pop(std::vector<uint8_t>& frame,
+                      std::string& key_,
+                      uint64_t& frame_id_)
 {
     std::unique_lock lock(mutex_);
-    size_t read_pos = read_pos_.load(std::memory_order_relaxed);
+    const size_t read_pos = read_pos_.load(std::memory_order_relaxed);
 
     if (read_pos == write_pos_.load(std::memory_order_acquire)) {
         return false; // Queue is empty
@@ -55,9 +61,11 @@ zarr::FrameQueue::pop(std::vector<uint8_t>& frame, std::string& key)
         return false;
     }
 
-    key = buffer_[read_pos].key;
-    frame.swap(buffer_[read_pos].data);
-    buffer_[read_pos].ready.store(false, std::memory_order_release);
+    auto& [key, data, frame_id, ready] = buffer_[read_pos];
+    key_ = key;
+    frame_id_ = frame_id;
+    frame.swap(data);
+    ready.store(false, std::memory_order_release);
 
     read_pos_.store((read_pos + 1) % capacity_, std::memory_order_release);
 

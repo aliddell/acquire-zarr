@@ -433,7 +433,7 @@ test_edge_cases()
     zarr::Downsampler downsampler(config, ZarrDownsamplingMethod_Mean);
 
     // Create a test image (11x11)
-    std::vector<uint8_t> image(std::move(ByteVector(11 * 11, 100)));
+    std::vector<uint8_t> image(11 * 11, 100);
     downsampler.add_frame(image);
 
     std::vector<uint8_t> downsampled;
@@ -466,8 +466,7 @@ test_min_max_downsampling()
 
     // Create a test image with a pattern that will show different results for
     // min/max/mean
-    std::vector<uint8_t> image(
-      std::move(ByteVector(10 * 10 * sizeof(uint8_t), 0)));
+    std::vector<uint8_t> image(10 * 10 * sizeof(uint8_t), 0);
     auto* typed_data = reinterpret_cast<uint8_t*>(image.data());
 
     // Create a pattern where each 2x2 block has values [100, 200, 150, 250]
@@ -645,8 +644,7 @@ test_pattern_downsampling()
                                           0);
 
     // Create a test image with a gradient pattern
-    std::vector<uint8_t> image(
-      std::move(ByteVector(8 * 8 * sizeof(uint16_t), 0)));
+    std::vector<uint8_t> image(8 * 8 * sizeof(uint16_t), 0);
 
     std::vector<uint16_t> expected_mean(4 * 4);
     std::vector<uint16_t> expected_min(4 * 4);

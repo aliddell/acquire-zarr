@@ -956,7 +956,8 @@ ZarrStream::append(const char* key_,
             // ready to enqueue the frame buffer
             if (frame_buffer_offset == frame_size_bytes) {
                 std::unique_lock lock(frame_queue_mutex_);
-                while (!frame_queue_->push(frame_buffer, key) &&
+                while (!frame_queue_->push(
+                         frame_buffer, key, output.frames_written++) &&
                        process_frames_) {
                     frame_queue_not_full_cv_.wait(lock);
                 }
@@ -985,7 +986,8 @@ ZarrStream::append(const char* key_,
             std::span frame(data, frame_size_bytes);
 
             std::unique_lock lock(frame_queue_mutex_);
-            while (!frame_queue_->push(frame, key) && process_frames_) {
+            while (!frame_queue_->push(frame, key, output.frames_written++) &&
+                   process_frames_) {
                 frame_queue_not_full_cv_.wait(lock);
             }
 
@@ -1628,6 +1630,7 @@ ZarrStream_s::process_frame_queue_()
     }
 
     std::string output_key;
+    uint64_t frame_id;
 
     std::vector<uint8_t> frame;
     while (process_frames_ || !frame_queue_->empty()) {
@@ -1650,7 +1653,7 @@ ZarrStream_s::process_frame_queue_()
             }
         }
 
-        if (!frame_queue_->pop(frame, output_key)) {
+        if (!frame_queue_->pop(frame, output_key, frame_id)) {
             continue;
         }
 
