@@ -141,7 +141,9 @@ zarr::Array::memory_usage() const noexcept
 }
 
 zarr::WriteResult
-zarr::Array::write_frame(std::vector<uint8_t>& frame, size_t& bytes_written)
+zarr::Array::write_frame(std::vector<uint8_t>& frame,
+                         size_t& bytes_written,
+                         uint64_t frame_id)
 {
     bytes_written = 0;
 
@@ -165,6 +167,15 @@ zarr::Array::write_frame(std::vector<uint8_t>& frame, size_t& bytes_written)
     }
 
     std::unique_lock lock(frames_mutex_);
+
+    // frame out of order, try again
+    if (frame_id > frames_written_()) {
+        LOG_DEBUG("Frame ID ",
+                  frame_id,
+                  " is out of order. Frames written: ",
+                  frames_written_());
+        return WriteResult::FrameOutOfOrder;
+    }
 
     // split the incoming frame into tiles and write them to the chunk
     // buffers

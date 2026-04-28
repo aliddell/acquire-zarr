@@ -56,9 +56,10 @@ struct ArrayConfig
 enum class WriteResult
 {
     Ok,
-    PartialWrite,      // incomplete write
-    OutOfBounds,       // append exceeded declared array_size_px
-    FrameSizeMismatch, // data size is not equal to the expected frame size
+    PartialWrite,
+    OutOfBounds,
+    FrameSizeMismatch,
+    FrameOutOfOrder,   // frame ID gap detected; predecessor not yet written
 };
 
 class ArrayBase
@@ -99,7 +100,8 @@ class ArrayBase
      * written in the OutOfBounds case.
      */
     [[nodiscard]] virtual WriteResult write_frame(std::vector<uint8_t>& frame,
-                                                  size_t& bytes_written) = 0;
+                                                  size_t& bytes_written,
+                                                  uint64_t frame_id) = 0;
 
     /**
      * @brief Query the maximum number of bytes we can append to this array.

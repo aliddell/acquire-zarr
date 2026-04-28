@@ -1243,6 +1243,7 @@ ZarrStream_s::configure_array_(const ZarrArraySettings* settings,
         .output_key = config->node_key,
         .frame_buffer_offset = 0,
         .bytes_written = 0,
+        .frames_written = 0,
     };
     try {
         output_node.array = zarr::make_array(config,
@@ -1671,39 +1672,63 @@ ZarrStream_s::process_frame_queue_()
             }
             return;
         } else {
-            const auto& output_node = it->second;
+            auto& output_node = it->second;
+            frame_id = output_node.frames_written.load();
 
             // try this as a thread job
             auto job = [this,
                         output_key,
                         array = output_node.array.get(),
-                        frame = std::move(frame)](std::string& err) mutable {
-                bool res = false;
+                        frame = std::move(frame),
+                        frame_id](std::string& err) mutable {
+                zarr::ThreadPool::TaskResult result;
+
                 try {
                     size_t n_bytes;
-                    res = array->write_frame(frame, n_bytes) ==
-                          zarr::WriteResult::Ok;
+                    const auto write_result =
+                      array->write_frame(frame, n_bytes, frame_id);
 
-                    if (!res) {
-                        err = "Failed to write frame to writer for key: " +
-                              output_key;
+                    switch (write_result) {
+                        case zarr::WriteResult::Ok:
+                            result = zarr::ThreadPool::TaskResult::Success;
+                            break;
+                        case zarr::WriteResult::PartialWrite:
+                            result = zarr::ThreadPool::TaskResult::Failure;
+                            err = "Partial write for key '" + output_key + "'";
+                            break;
+                        case zarr::WriteResult::OutOfBounds:
+                            result = zarr::ThreadPool::TaskResult::Fatal;
+                            err = "OOB write for key '" + output_key + "'";
+                            break;
+                        case zarr::WriteResult::FrameSizeMismatch:
+                            result = zarr::ThreadPool::TaskResult::Fatal;
+                            err = "Frame size mismatch for key '" + output_key +
+                                  "'";
+                            break;
+                        case zarr::WriteResult::FrameOutOfOrder:
+                            result = zarr::ThreadPool::TaskResult::Retry;
+                            break;
+                        default:
+                            result = zarr::ThreadPool::TaskResult::Fatal;
+                            err =
+                              "Unidentified error for key '" + output_key + "'";
                     }
                 } catch (const std::exception& exc) {
                     err = "Failed to write frame to writer for key '" +
                           output_key + "': " + exc.what();
+                    result = zarr::ThreadPool::TaskResult::Fatal;
                 }
 
-                if (!res) {
+                if (result == zarr::ThreadPool::TaskResult::Fatal) {
                     std::unique_lock lock(frame_queue_mutex_);
                     process_frames_ = false;
                     frame_queue_->clear();
                     frame_queue_not_full_cv_.notify_all();
                     frame_queue_empty_cv_.notify_all();
                     frame_queue_finished_cv_.notify_all();
-                    return zarr::ThreadPool::TaskResult::Fatal;
                 }
 
-                return zarr::ThreadPool::TaskResult::Success;
+                return result;
             };
 
             // one thread is reserved for processing the frame queue and
@@ -1715,6 +1740,8 @@ ZarrStream_s::process_frame_queue_()
                     LOG_ERROR("derp"); // TODO (aliddell): better msg
                 }
             }
+
+            output_node.frames_written.fetch_add(1);
         }
 
         {

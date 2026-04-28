@@ -22,7 +22,8 @@ class Array : public ArrayBase
     size_t memory_usage() const noexcept override;
 
     [[nodiscard]] WriteResult write_frame(std::vector<uint8_t>& frame,
-                                          size_t& bytes_written) override;
+                                          size_t& bytes_written,
+                                          uint64_t frame_id) override;
     size_t max_bytes() const override;
 
   protected:

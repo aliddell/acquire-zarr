@@ -18,7 +18,8 @@ class MultiscaleArray : public ArrayBase
     size_t memory_usage() const noexcept override;
 
     [[nodiscard]] WriteResult write_frame(std::vector<uint8_t>& frame,
-                                          size_t& bytes_written) override;
+                                          size_t& bytes_written,
+                                          uint64_t frame_id) override;
     size_t max_bytes() const override;
 
   protected:
@@ -58,10 +59,11 @@ class MultiscaleArray : public ArrayBase
      * @brief Add @p data to downsampler and write downsampled frames to
      * lower-resolution arrays.
      * @param frame The frame data to write.
-     * @param frame_id
+     * @param frame_id Index of the frame to write.
      * @return WriteResult::Ok if all levels are written successfully. otherwise
      * the WriteResult associated with the failure.
      */
-    WriteResult write_multiscale_frames_(std::vector<uint8_t>& frame) const;
+    WriteResult write_multiscale_frames_(std::vector<uint8_t>& frame,
+                                         uint64_t frame_id) const;
 };
 } // namespace zarr
