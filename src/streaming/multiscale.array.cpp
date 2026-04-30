@@ -63,14 +63,13 @@ zarr::MultiscaleArray::write_frame(std::vector<uint8_t>& frame,
 
     size_t n_bytes;
 
-    std::unique_lock lock(frames_mutex_);
     if (const auto result = arrays_[0]->write_frame(frame, n_bytes, frame_id);
         result != WriteResult::Ok) {
         LOG_ERROR("Failed to write data to full-resolution array.");
         return result;
     }
 
-    write_multiscale_frames_(frame, frame_id);
+    write_multiscale_frames_(frame);
     return WriteResult::Ok;
 }
 
@@ -153,6 +152,8 @@ zarr::MultiscaleArray::create_arrays_()
         arrays_.push_back(std::make_unique<Array>(
           config, thread_pool_, file_handle_pool_, s3_connection_pool_));
     }
+
+    array_frame_ids_.resize(arrays_.size(), 0);
 
     return true;
 }
@@ -287,8 +288,7 @@ zarr::MultiscaleArray::make_base_array_config_() const
 }
 
 zarr::WriteResult
-zarr::MultiscaleArray::write_multiscale_frames_(std::vector<uint8_t>& frame,
-                                                uint64_t frame_id) const
+zarr::MultiscaleArray::write_multiscale_frames_(std::vector<uint8_t>& frame)
 {
     if (!downsampler_) {
         return WriteResult::Ok; // no downsampler, nothing to do
@@ -299,12 +299,11 @@ zarr::MultiscaleArray::write_multiscale_frames_(std::vector<uint8_t>& frame,
     for (auto i = 1; i < arrays_.size(); ++i) {
         if (std::vector<uint8_t> downsampled_frame;
             downsampler_->take_frame(i, downsampled_frame)) {
+            auto& frame_id = array_frame_ids_[i];
 
             size_t n_bytes;
             if (const auto result = arrays_[i]->write_frame(
-                  downsampled_frame,
-                  n_bytes,
-                  frame_id); // TODO (aliddell): compute a downsampled frame id
+                  downsampled_frame, n_bytes, frame_id++);
                 result != WriteResult::Ok) {
                 LOG_ERROR("Failed to write frame to LOD ", i);
                 return result;

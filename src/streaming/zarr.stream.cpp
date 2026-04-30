@@ -899,14 +899,14 @@ ZarrStream::append(const char* key_,
 
     // if the key is null and we have only one output array, use that
     std::string key;
-    if (key_ == nullptr && output_arrays_.size() == 1) {
-        key = output_arrays_.begin()->first;
+    if (key_ == nullptr && arrays_.size() == 1) {
+        key = arrays_.begin()->first;
     } else {
         key = zarr::regularize_key(key_);
     }
 
-    const auto array_it = output_arrays_.find(key);
-    if (array_it == output_arrays_.end()) {
+    const auto array_it = arrays_.find(key);
+    if (array_it == arrays_.end()) {
         return ZarrStatusCode_KeyNotFound;
     }
 
@@ -916,20 +916,21 @@ ZarrStream::append(const char* key_,
     }
 
     auto& output = array_it->second;
-    if (output.max_array_size_bytes > 0 &&
-        output.bytes_written + bytes_in > output.max_array_size_bytes) {
+
+    if (output->max_array_size_bytes > 0 &&
+        output->bytes_written + bytes_in > output->max_array_size_bytes) {
         LOG_ERROR("Incoming byte count ",
                   bytes_in,
                   " will overflow array (bytes written: ",
-                  output.bytes_written,
+                  output->bytes_written,
                   ", maximum bytes: ",
-                  output.max_array_size_bytes,
+                  output->max_array_size_bytes,
                   ")");
         return ZarrStatusCode_WriteOutOfBounds;
     }
-    auto& frame_buffer = output.frame_buffer;
-    auto& frame_buffer_offset = output.frame_buffer_offset;
-    const size_t frame_size_bytes = output.frame_size_bytes;
+    auto& frame_buffer = output->frame_buffer;
+    auto& frame_buffer_offset = output->frame_buffer_offset;
+    const size_t frame_size_bytes = output->frame_size_bytes;
 
     if (frame_buffer.empty() && frame_buffer_offset > 0) {
         set_error_("Corrupted frame buffer for key '" + key + "'");
@@ -957,10 +958,11 @@ ZarrStream::append(const char* key_,
             if (frame_buffer_offset == frame_size_bytes) {
                 std::unique_lock lock(frame_queue_mutex_);
                 while (!frame_queue_->push(
-                         frame_buffer, key, output.frames_written++) &&
+                         frame_buffer, key, output->frames_queued) &&
                        process_frames_) {
                     frame_queue_not_full_cv_.wait(lock);
                 }
+                ++output->frames_queued;
 
                 if (process_frames_) {
                     frame_queue_not_empty_cv_.notify_one();
@@ -986,10 +988,11 @@ ZarrStream::append(const char* key_,
             std::span frame(data, frame_size_bytes);
 
             std::unique_lock lock(frame_queue_mutex_);
-            while (!frame_queue_->push(frame, key, output.frames_written++) &&
+            while (!frame_queue_->push(frame, key, output->frames_queued) &&
                    process_frames_) {
                 frame_queue_not_full_cv_.wait(lock);
             }
+            ++output->frames_queued;
 
             if (process_frames_) {
                 frame_queue_not_empty_cv_.notify_one();
@@ -1002,7 +1005,7 @@ ZarrStream::append(const char* key_,
             data = data ? data + frame_size_bytes : data;
         }
     }
-    output.bytes_written += bytes_out;
+    output->bytes_written += bytes_out;
 
     CHECK(bytes_out <= bytes_in);
     if (bytes_out < bytes_in) {
@@ -1020,8 +1023,8 @@ ZarrStream_s::write_custom_metadata(const std::optional<std::string>& array_key,
     std::string key;
     if (array_key.has_value()) {
         key = zarr::regularize_key(*array_key);
-    } else if (output_arrays_.size() == 1) {
-        key = output_arrays_.begin()->first;
+    } else if (arrays_.size() == 1) {
+        key = arrays_.begin()->first;
     } else {
         LOG_ERROR(
           "Array key is required when there are multiple output arrays");
@@ -1029,7 +1032,7 @@ ZarrStream_s::write_custom_metadata(const std::optional<std::string>& array_key,
     }
     const std::string meta_key = zarr::regularize_key(metadata_key);
 
-    if (const auto it = output_arrays_.find(key); it == output_arrays_.end()) {
+    if (const auto it = arrays_.find(key); it == arrays_.end()) {
         LOG_ERROR("Array key '", key, "' not found in output arrays");
         return ZarrStatusCode_KeyNotFound;
     } else {
@@ -1039,8 +1042,8 @@ ZarrStream_s::write_custom_metadata(const std::optional<std::string>& array_key,
             return ZarrStatusCode_InvalidArgument;
         }
 
-        if (const auto& arr = it->second;
-            !arr.array->write_custom_metadata(meta_key, metadata_json)) {
+        if (const auto& output = it->second;
+            !output->array->write_custom_metadata(meta_key, metadata_json)) {
             LOG_ERROR("Error writing custom metadata for array '", key, "'");
             return ZarrStatusCode_IOError;
         }
@@ -1053,9 +1056,9 @@ size_t
 ZarrStream_s::get_memory_usage() const noexcept
 {
     size_t usage = frame_queue_->bytes_used();
-    for (const auto& [key, output] : output_arrays_) {
-        const auto frame_buffer_size = output.frame_buffer.size();
-        const auto array_memory_usage = output.array->memory_usage();
+    for (const auto& [key, output] : arrays_) {
+        const auto frame_buffer_size = output->frame_buffer.size();
+        const auto array_memory_usage = output->array->memory_usage();
         usage += (frame_buffer_size + array_memory_usage);
     }
 
@@ -1239,34 +1242,36 @@ ZarrStream_s::configure_array_(const ZarrArraySettings* settings,
         return false;
     }
 
-    ZarrOutputArray output_node{
-        .output_key = config->node_key,
-        .frame_buffer_offset = 0,
-        .bytes_written = 0,
-        .frames_written = 0,
-    };
+    const auto& dims = config->dimensions;
+    const size_t frame_size_bytes = dims->width_dim().array_size_px *
+                                    dims->height_dim().array_size_px *
+                                    zarr::bytes_of_type(settings->data_type);
+
+    auto output = std::make_unique<OutputArray>(config->node_key,
+                                                std::vector<uint8_t>(),
+                                                0,
+                                                frame_size_bytes,
+                                                nullptr,
+                                                0,
+                                                0,
+                                                0);
     try {
-        output_node.array = zarr::make_array(config,
-                                             thread_pool_,
-                                             file_handle_pool_,
-                                             s3_connection_pool_,
-                                             is_hcs_array);
+        output->array = zarr::make_array(config,
+                                         thread_pool_,
+                                         file_handle_pool_,
+                                         s3_connection_pool_,
+                                         is_hcs_array);
     } catch (const std::exception& exc) {
         set_error_(exc.what());
     }
 
-    if (output_node.array == nullptr) {
+    if (output->array == nullptr) {
         set_error_("Failed to create output node: " + error_);
         return false;
     }
 
-    output_node.max_array_size_bytes = output_node.array->max_bytes();
-
-    const auto& dims = config->dimensions;
-    output_node.frame_size_bytes = dims->width_dim().array_size_px *
-                                   dims->height_dim().array_size_px *
-                                   zarr::bytes_of_type(settings->data_type);
-    output_arrays_.emplace(output_node.output_key, std::move(output_node));
+    output->max_array_size_bytes = output->array->max_bytes();
+    arrays_.emplace(output->key, std::move(output));
 
     return true;
 }
@@ -1586,8 +1591,8 @@ ZarrStream_s::init_frame_queue_()
     }
 
     size_t frame_size_bytes = 0;
-    for (const auto& output : output_arrays_ | std::views::values) {
-        frame_size_bytes = std::max(frame_size_bytes, output.frame_size_bytes);
+    for (const auto& output : arrays_ | std::views::values) {
+        frame_size_bytes = std::max(frame_size_bytes, output->frame_size_bytes);
     }
 
     // cap the frame buffer at 2 GiB, or 10 frames, whichever is larger
@@ -1612,7 +1617,7 @@ ZarrStream_s::init_frame_queue_()
             return zarr::ThreadPool::TaskResult::Success;
         };
 
-        EXPECT(thread_pool_->push_job_with_retry(job, 8),
+        EXPECT(thread_pool_->push_job(job, 8),
                "Failed to push frame processing job to thread pool.");
     } catch (const std::exception& e) {
         set_error_("Error creating frame queue: " + std::string(e.what()));
@@ -1658,90 +1663,52 @@ ZarrStream_s::process_frame_queue_()
             continue;
         }
 
-        if (auto it = output_arrays_.find(output_key);
-            it == output_arrays_.end()) {
+        std::string err;
+        if (auto it = arrays_.find(output_key); it == arrays_.end()) {
             // If we have gotten here, something has gone seriously wrong
-            set_error_("Output node not found for key: '" + output_key + "'");
-            {
+            err = "Output node not found for key: '" + output_key + "'";
+        } else {
+            const auto& output = it->second;
+            const auto& array = output->array;
+
+            try {
+                switch (size_t n_bytes;
+                        array->write_frame(frame, n_bytes, frame_id)) {
+                    case zarr::WriteResult::Ok:
+                        break;
+                    case zarr::WriteResult::PartialWrite:
+                        err = "Partial write for key '" + output_key + "'";
+                        break;
+                    case zarr::WriteResult::OutOfBounds:
+                        err = "OOB write for key '" + output_key + "'";
+                        break;
+                    case zarr::WriteResult::FrameSizeMismatch:
+                        err =
+                          "Frame size mismatch for key '" + output_key + "'";
+                        break;
+                    case zarr::WriteResult::FrameOutOfOrder:
+                        err = "Frame id " + std::to_string(frame_id) +
+                              " out of order for array '" + output_key + "'";
+                        break;
+                    default:
+                        err = "Unidentified error for key '" + output_key + "'";
+                }
+            } catch (const std::exception& exc) {
+                err = "Failed to write frame to writer for key '" + output_key +
+                      "': " + exc.what();
+            }
+
+            if (!err.empty()) {
+                set_error_(err);
+
                 std::unique_lock lock(frame_queue_mutex_);
                 process_frames_ = false;
                 frame_queue_->clear();
                 frame_queue_not_full_cv_.notify_all();
                 frame_queue_empty_cv_.notify_all();
                 frame_queue_finished_cv_.notify_all();
+                return;
             }
-            return;
-        } else {
-            auto& output_node = it->second;
-            frame_id = output_node.frames_written.load();
-
-            // try this as a thread job
-            auto job = [this,
-                        output_key,
-                        array = output_node.array.get(),
-                        frame = std::move(frame),
-                        frame_id](std::string& err) mutable {
-                zarr::ThreadPool::TaskResult result;
-
-                try {
-                    size_t n_bytes;
-                    const auto write_result =
-                      array->write_frame(frame, n_bytes, frame_id);
-
-                    switch (write_result) {
-                        case zarr::WriteResult::Ok:
-                            result = zarr::ThreadPool::TaskResult::Success;
-                            break;
-                        case zarr::WriteResult::PartialWrite:
-                            result = zarr::ThreadPool::TaskResult::Failure;
-                            err = "Partial write for key '" + output_key + "'";
-                            break;
-                        case zarr::WriteResult::OutOfBounds:
-                            result = zarr::ThreadPool::TaskResult::Fatal;
-                            err = "OOB write for key '" + output_key + "'";
-                            break;
-                        case zarr::WriteResult::FrameSizeMismatch:
-                            result = zarr::ThreadPool::TaskResult::Fatal;
-                            err = "Frame size mismatch for key '" + output_key +
-                                  "'";
-                            break;
-                        case zarr::WriteResult::FrameOutOfOrder:
-                            result = zarr::ThreadPool::TaskResult::Retry;
-                            break;
-                        default:
-                            result = zarr::ThreadPool::TaskResult::Fatal;
-                            err =
-                              "Unidentified error for key '" + output_key + "'";
-                    }
-                } catch (const std::exception& exc) {
-                    err = "Failed to write frame to writer for key '" +
-                          output_key + "': " + exc.what();
-                    result = zarr::ThreadPool::TaskResult::Fatal;
-                }
-
-                if (result == zarr::ThreadPool::TaskResult::Fatal) {
-                    std::unique_lock lock(frame_queue_mutex_);
-                    process_frames_ = false;
-                    frame_queue_->clear();
-                    frame_queue_not_full_cv_.notify_all();
-                    frame_queue_empty_cv_.notify_all();
-                    frame_queue_finished_cv_.notify_all();
-                }
-
-                return result;
-            };
-
-            // one thread is reserved for processing the frame queue and
-            // runs the entire lifetime of the stream
-            if (thread_pool_->n_threads() == 1 ||
-                !thread_pool_->push_job(job)) {
-                if (!thread_pool_->execute_job_with_retry(job, 3)) {
-                    // signals are sent in the job
-                    LOG_ERROR("derp"); // TODO (aliddell): better msg
-                }
-            }
-
-            output_node.frames_written.fetch_add(1);
         }
 
         {
@@ -1808,8 +1775,8 @@ finalize_stream(ZarrStream* stream)
     // thread
     stream->thread_pool_->await_stop();
 
-    for (auto& [key, output] : stream->output_arrays_) {
-        if (!zarr::finalize_array(std::move(output.array))) {
+    for (auto& [key, output] : stream->arrays_) {
+        if (!zarr::finalize_array(std::move(output->array))) {
             LOG_ERROR(
               "Error finalizing Zarr stream. Failed to finalize array '",
               key,

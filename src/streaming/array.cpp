@@ -96,6 +96,7 @@ zarr::Array::Array(std::shared_ptr<ArrayConfig> config,
   , bytes_to_flush_{ 0 }
   , append_chunk_index_{ 0 }
   , is_closing_{ false }
+  , last_successful_frame_id_{ 0 }
   , current_layer_{ 0 }
 {
     const size_t n_chunks = config_->dimensions->number_of_chunks_in_memory();
@@ -166,14 +167,15 @@ zarr::Array::write_frame(std::vector<uint8_t>& frame,
         return WriteResult::OutOfBounds;
     }
 
-    std::unique_lock lock(frames_mutex_);
-
     // frame out of order, try again
-    if (frame_id > frames_written_()) {
+    auto frames_written = frames_written_();
+    if (frame_id != frames_written) {
         LOG_DEBUG("Frame ID ",
                   frame_id,
                   " is out of order. Frames written: ",
-                  frames_written_());
+                  frames_written,
+                  ", last frame ID: ",
+                  last_successful_frame_id_);
         return WriteResult::FrameOutOfOrder;
     }
 
@@ -182,10 +184,18 @@ zarr::Array::write_frame(std::vector<uint8_t>& frame,
     bytes_written = write_frame_to_chunks_(frame);
     CHECK(bytes_written <= nbytes_data);
 
-    LOG_DEBUG(
-      "Wrote ", bytes_written, " bytes to LOD ", config_->level_of_detail);
+    last_successful_frame_id_ = frame_id;
     bytes_to_flush_ += bytes_written;
     total_bytes_written_ += bytes_written;
+    frames_written = frames_written_();
+    LOG_DEBUG("Wrote ",
+              bytes_written,
+              " bytes of frame ",
+              last_successful_frame_id_,
+              " to LOD ",
+              config_->level_of_detail,
+              "; frames written: ",
+              frames_written);
 
     if (should_flush_()) {
         CHECK(compress_and_flush_data_());
@@ -701,7 +711,7 @@ zarr::Array::compress_and_flush_data_()
                     if (success) {
                         result = ThreadPool::TaskResult::Success;
                     } else { // failed to write table
-                        result = ThreadPool::TaskResult::Failure;
+                        result = ThreadPool::TaskResult::Fatal;
                     }
                 } catch (const std::exception& exc) {
                     err = std::string("Failed skipping chunk: ") + exc.what();

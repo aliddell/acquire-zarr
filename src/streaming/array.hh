@@ -27,8 +27,6 @@ class Array : public ArrayBase
     size_t max_bytes() const override;
 
   protected:
-    std::mutex frames_mutex_;
-
     std::vector<std::shared_ptr<Chunk>> chunks_;
     std::vector<std::mutex> chunk_mutexes_;
 
@@ -49,6 +47,7 @@ class Array : public ArrayBase
     std::string data_root_;
     bool is_closing_;
 
+    uint64_t last_successful_frame_id_;
     uint32_t current_layer_;
     std::vector<size_t> shard_file_offsets_;
     std::vector<std::vector<uint64_t>> shard_tables_;

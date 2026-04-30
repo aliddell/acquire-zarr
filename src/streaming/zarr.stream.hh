@@ -61,16 +61,16 @@ struct ZarrStream_s
     size_t get_memory_usage() const noexcept;
 
   private:
-    struct ZarrOutputArray
+    struct OutputArray
     {
-        std::string output_key;
+        std::string key;
         std::vector<uint8_t> frame_buffer;
         size_t frame_buffer_offset;
         size_t frame_size_bytes;
         std::unique_ptr<zarr::ArrayBase> array;
         size_t max_array_size_bytes;
         size_t bytes_written;
-        std::atomic<uint64_t> frames_written;
+        uint64_t frames_queued;
     };
 
     std::string error_; // error message. If nonempty, an error occurred.
@@ -82,7 +82,7 @@ struct ZarrStream_s
     std::unordered_map<std::string, zarr::Plate> plates_;
     std::unordered_map<std::string, const zarr::Well&> wells_;
 
-    std::unordered_map<std::string, ZarrOutputArray> output_arrays_;
+    std::unordered_map<std::string, std::unique_ptr<OutputArray>> arrays_;
     std::vector<std::string> intermediate_group_paths_;
 
     std::mutex frame_queue_mutex_;

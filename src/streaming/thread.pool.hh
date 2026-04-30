@@ -16,7 +16,6 @@ class ThreadPool
     {
         Success,
         Retry,   // requeue the job
-        Failure, // log + call error_handler_, continue pool
         Fatal,   // log + call error_handler_, stop pool
     };
 
@@ -35,14 +34,13 @@ class ThreadPool
      * @brief Push a job onto the job queue.
      *
      * @param job The job to push onto the queue.
+     * @param max_retries
      * @return true if the job was successfully pushed onto the queue, false
      * otherwise.
      */
-    [[nodiscard]] bool push_job(Task&& job);
-
-    // TODO (aliddell: docstring)
-    [[nodiscard]] bool push_job_with_retry(Task&& job,
-                                           uint32_t max_retries = 3);
+    [[nodiscard]] bool push_job(
+      Task&& job,
+      std::optional<uint32_t> max_retries = std::nullopt);
 
     // TODO (aliddell: docstring)
     [[nodiscard]] static bool execute_job(Task&& job);
@@ -65,6 +63,13 @@ class ThreadPool
     uint32_t n_threads() const;
 
   private:
+    struct TaskWrapper
+    {
+        Task task;
+        std::optional<uint32_t> max_retries;
+        uint32_t attempt;
+    };
+
     ErrorCallback error_handler_;
 
     std::thread::id main_thread_id_;
@@ -74,11 +79,12 @@ class ThreadPool
     std::atomic<bool> accepting_jobs{ true };
     std::mutex jobs_mutex_;
     std::condition_variable jobs_cv_;
-    std::queue<Task> jobs_;
+    std::queue<TaskWrapper> jobs_;
 
     std::vector<std::string> error_messages_;
 
-    std::optional<Task> pop_from_job_queue_() noexcept;
+    void push_to_queue_(TaskWrapper&& job);
+    std::optional<TaskWrapper> pop_from_job_queue_() noexcept;
     [[nodiscard]] bool should_stop_() const noexcept;
     void process_tasks_();
 };

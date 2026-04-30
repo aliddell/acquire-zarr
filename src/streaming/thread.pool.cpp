@@ -32,34 +32,21 @@ zarr::ThreadPool::~ThreadPool() noexcept
 }
 
 bool
-zarr::ThreadPool::push_job(Task&& job)
+zarr::ThreadPool::push_job(Task&& job, std::optional<uint32_t> max_retries)
 {
     std::unique_lock lock(jobs_mutex_);
     if (!accepting_jobs) {
         return false;
     }
 
-    jobs_.push(job);
-    jobs_cv_.notify_one();
+    TaskWrapper wrapper{
+        .task = std::move(job),
+        .max_retries = max_retries,
+        .attempt = 0,
+    };
 
+    push_to_queue_(std::move(wrapper));
     return true;
-}
-
-bool
-zarr::ThreadPool::push_job_with_retry(Task&& job, uint32_t max_retries)
-{
-    auto attempts = std::make_shared<uint32_t>(0);
-    return push_job([job = std::move(job), attempts, max_retries](
-                      std::string& err) mutable -> TaskResult {
-        const auto result = job(err);
-        if (result == TaskResult::Retry) {
-            if (++(*attempts) >= max_retries) {
-                err = "Max retries exceeded: " + err;
-                return TaskResult::Failure;
-            }
-        }
-        return result;
-    });
 }
 
 bool
@@ -79,12 +66,10 @@ zarr::ThreadPool::execute_job_with_retry(Task&& job, uint32_t max_retries)
     std::string err_msg;
 
     for (uint32_t retry = 0; retry < max_retries; ++retry) {
-
         switch (job(err_msg)) {
             case TaskResult::Success:
                 return true;
             case TaskResult::Retry:
-            case TaskResult::Failure:
                 continue;
             case TaskResult::Fatal:
                 LOG_ERROR("Error while executing job: ", err_msg);
@@ -123,7 +108,14 @@ zarr::ThreadPool::n_threads() const
     return threads_.size();
 }
 
-std::optional<zarr::ThreadPool::Task>
+void
+zarr::ThreadPool::push_to_queue_(TaskWrapper&& job)
+{
+    jobs_.push(job);
+    jobs_cv_.notify_one();
+}
+
+std::optional<zarr::ThreadPool::TaskWrapper>
 zarr::ThreadPool::pop_from_job_queue_() noexcept
 {
     if (jobs_.empty()) {
@@ -155,15 +147,16 @@ zarr::ThreadPool::process_tasks_()
         if (auto job = pop_from_job_queue_(); job.has_value()) {
             lock.unlock();
 
-            switch (std::string err_msg; job.value()(err_msg)) {
+            switch (std::string err_msg; job->task(err_msg)) {
                 case TaskResult::Success:
                     break;
                 case TaskResult::Retry:
-                    push_job(std::move(job.value())); // requeue
-                    break;
-                case TaskResult::Failure:
-                    error_messages_.push_back(err_msg);
-                    error_handler_(err_msg);
+                    if (const auto max_retries =
+                          job->max_retries ? *job->max_retries : 3;
+                        job->attempt < max_retries) {
+                        ++job->attempt;
+                        push_to_queue_(std::move(*job)); // requeue
+                    }
                     break;
                 case TaskResult::Fatal:
                     error_messages_.push_back(err_msg);
