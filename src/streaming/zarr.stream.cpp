@@ -1755,9 +1755,8 @@ ZarrStream_s::finalize_frame_queue_()
               return frame_queue_processing_done_.load() ||
                      frame_queue_->empty();
           })) {
-        LOG_ERROR("Timed out waiting for frame queue to finalize after 30s; "
-LOG_ERROR("Timed out waiting for frame queue to finalize after 300s; "
-"proceeding with shutdown");
+        LOG_ERROR("Timed out waiting for frame queue to finalize after 300s; "
+                  "proceeding with shutdown");
     }
 }
 

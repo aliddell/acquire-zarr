@@ -155,6 +155,7 @@ zarr::ThreadPool::process_tasks_()
                           job->max_retries ? *job->max_retries : 3;
                         job->attempt < max_retries) {
                         ++job->attempt;
+                        lock.lock();
                         push_to_queue_(std::move(*job)); // requeue
                     }
                     break;
@@ -162,6 +163,7 @@ zarr::ThreadPool::process_tasks_()
                     error_messages_.push_back(err_msg);
                     error_handler_(err_msg);
                     accepting_jobs = false; // drain and stop
+                    jobs_cv_.notify_all();
                     break;
             }
         }

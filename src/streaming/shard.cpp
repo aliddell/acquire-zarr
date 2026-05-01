@@ -84,7 +84,9 @@ zarr::Shard::compress_and_write_chunk(
 
     std::unique_lock lock(mutex_);
     CHECK(unwritten_chunks_ > 0);
-    if (unwritten_chunks_.fetch_sub(1) == 0) {
+
+    // fetch_sub returns the value immediately preceding mutation
+    if (unwritten_chunks_.fetch_sub(1) == 1) {
         res = write_table_();
     }
     cv_.notify_all();
@@ -102,7 +104,9 @@ zarr::Shard::skip_chunk(uint32_t internal_index)
 
     std::unique_lock lock(mutex_);
     CHECK(unwritten_chunks_ > 0);
-    if (unwritten_chunks_.fetch_sub(1) == 0) {
+
+    // fetch_sub returns the value immediately preceding mutation
+    if (unwritten_chunks_.fetch_sub(1) == 1) {
         res = write_table_();
     }
     cv_.notify_all();
@@ -121,7 +125,7 @@ zarr::Shard::make_sink_()
 }
 
 bool
-zarr::Shard::write_table_()
+zarr::Shard::write_table_() const
 {
     const size_t n_chunks = offsets_.size();
     const size_t table_size_bytes = 2 * n_chunks * sizeof(uint64_t);
