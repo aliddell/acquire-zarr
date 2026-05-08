@@ -111,7 +111,7 @@ zarr::ThreadPool::n_threads() const
 void
 zarr::ThreadPool::push_to_queue_(TaskWrapper&& job)
 {
-    jobs_.push(job);
+    jobs_.push(std::move(job));
     jobs_cv_.notify_one();
 }
 
@@ -157,8 +157,12 @@ zarr::ThreadPool::process_tasks_()
                         ++job->attempt;
                         lock.lock();
                         push_to_queue_(std::move(*job)); // requeue
+                        break;
+                    } else {
+                        err_msg = "Max retries (" +
+                                  std::to_string(max_retries) + ") exceeded";
+                        // roll down to TaskResult::Fatal case
                     }
-                    break;
                 case TaskResult::Fatal:
                     error_messages_.push_back(err_msg);
                     error_handler_(err_msg);

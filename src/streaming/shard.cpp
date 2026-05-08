@@ -30,12 +30,8 @@ zarr::Shard::Shard(const ShardConfig& config,
 zarr::Shard::~Shard()
 {
     try {
-        bool res = false;
-        if (!table_flushed_) {
-            res = write_table_();
-        }
-
-        if (!res) {
+        std::unique_lock lock(mutex_);
+        if (const bool res = table_flushed_ ? true : write_table_(); !res) {
             LOG_ERROR("Failed to write shard table.");
         }
 
@@ -67,22 +63,23 @@ zarr::Shard::compress_and_write_chunk(
         return false;
     }
 
-    uint64_t offset;
     extents_[internal_index] = buffer.size();
 
-    {
-        std::unique_lock lock(mutex_);
-        offset = offsets_[internal_index] = file_offset_;
-        file_offset_ += buffer.size();
-    }
+    std::unique_lock lock(mutex_);
+    const uint64_t offset = offsets_[internal_index] = file_offset_;
 
+    // if this write fails, the file offset will still be incremented by the
+    // size of this chunk, so we can come back later and retry it
+    file_offset_ += buffer.size();
+
+    lock.unlock();
     bool res = sink_->write(offset, buffer);
-    if (!res) {
+    if (!res) { // TODO (aliddell): retry failed writes
         LOG_ERROR("Failed to write chunk");
         return false;
     }
+    lock.lock();
 
-    std::unique_lock lock(mutex_);
     CHECK(unwritten_chunks_ > 0);
 
     // fetch_sub returns the value immediately preceding mutation
@@ -125,7 +122,7 @@ zarr::Shard::make_sink_()
 }
 
 bool
-zarr::Shard::write_table_() const
+zarr::Shard::write_table_()
 {
     const size_t n_chunks = offsets_.size();
     const size_t table_size_bytes = 2 * n_chunks * sizeof(uint64_t);
@@ -134,14 +131,14 @@ zarr::Shard::write_table_() const
 
     auto* table_u64 = reinterpret_cast<uint64_t*>(table_ptr);
 
-    for (auto i = 0; i < 2 * n_chunks; i += 2) {
-        table_u64[i] = offsets_[i / 2];
-        table_u64[i + 1] = extents_[i / 2];
+    for (auto i = 0; i < n_chunks; ++i) {
+        table_u64[2 * i] = offsets_[i];
+        table_u64[2 * i + 1] = extents_[i];
     }
 
     // compute crc32 checksum of the table
-    const uint32_t checksum = crc32c::Crc32c(table_ptr, table_size_bytes);
-    memcpy(table_ptr + table_size_bytes, &checksum, sizeof(uint32_t));
+    auto* checksum = reinterpret_cast<uint32_t*>(table_ptr + table_size_bytes);
+    *checksum = crc32c::Crc32c(table_ptr, table_size_bytes);
 
-    return sink_->write(file_offset_, table);
+    return table_flushed_ = sink_->write(file_offset_, table);
 }

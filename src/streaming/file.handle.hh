@@ -79,12 +79,12 @@ class FileHandlePool
     const uint64_t max_active_handles_;
     std::list<std::string> lru_order_; // front = most recent
     std::unordered_map<std::string, CacheEntry> cache_;
+    bool cache_space_available_;
     std::mutex mutex_;
     std::condition_variable cv_;
 
-    // Evicts the least recently used handle with refcount == 0.
-    // Returns false if no idle handle exists.
+    // Evicts the least recently used handle with refcount == 0, if any.
     // Must be called with mutex_ held.
-    bool evict_lru_();
+    void evict_lru_();
 };
 } // namespace zarr

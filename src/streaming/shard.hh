@@ -62,7 +62,7 @@ class Shard
     std::unique_ptr<Sink> sink_;
 
     void make_sink_();
-    [[nodiscard]] bool write_table_() const;
+    [[nodiscard]] bool write_table_();
 };
 
 } // namespace zarr

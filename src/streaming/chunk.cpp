@@ -71,7 +71,7 @@ zarr::Chunk::compress_and_take_buffer(
   const std::optional<CompressionParams>& compression_params,
   std::vector<uint8_t>& data)
 {
-    if (is_compressed_ || !compression_params) {
+    if (!compression_params) {
         std::unique_lock lock(mutex_);
         data.resize(buffer_.size());
         std::ranges::copy(buffer_.begin(), buffer_.end(), data.begin());
@@ -80,6 +80,13 @@ zarr::Chunk::compress_and_take_buffer(
     }
 
     std::unique_lock lock(mutex_);
+    if (is_compressed_) {
+        data.resize(buffer_.size());
+        std::ranges::copy(buffer_.begin(), buffer_.end(), data.begin());
+
+        return true;
+    }
+
     if (!std::visit(
           [this]<typename ParamT>(const ParamT& params) {
               using T = std::decay_t<ParamT>;

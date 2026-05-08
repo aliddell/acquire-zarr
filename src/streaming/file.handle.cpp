@@ -41,6 +41,7 @@ zarr::FileHandle::get() const
 
 zarr::FileHandlePool::FileHandlePool()
   : max_active_handles_(get_max_active_handles())
+  , cache_space_available_(true)
 {
 }
 
@@ -56,10 +57,9 @@ zarr::FileHandlePool::get_handle(const std::string& filename)
 {
     std::unique_lock lock(mutex_);
 
-    // block until we can either serve from cache or evict something
+    // block until we can serve from cache or space is available
     cv_.wait(lock, [&] {
-        return cache_.contains(filename) ||
-               cache_.size() < max_active_handles_ || evict_lru_();
+        return cache_.contains(filename) || cache_space_available_;
     });
 
     auto it = cache_.find(filename);
@@ -80,6 +80,9 @@ zarr::FileHandlePool::get_handle(const std::string& filename)
         it->second.lru_it = lru_order_.begin();
     }
 
+    cache_space_available_ = cache_.size() < max_active_handles_;
+    cv_.notify_one();
+
     ++it->second.refcount;
     return BorrowedHandle(it->second.handle.get(), filename, this);
 }
@@ -98,10 +101,15 @@ zarr::FileHandlePool::return_handle(const std::string& filename)
         --it->second.refcount;
     }
 
+    if (cache_.size() >= max_active_handles_) {
+        evict_lru_();
+    }
+    cache_space_available_ = cache_.size() < max_active_handles_;
+
     cv_.notify_all();
 }
 
-bool
+void
 zarr::FileHandlePool::evict_lru_()
 {
     // iterate from back (least recent) looking for idle handle
@@ -110,8 +118,7 @@ zarr::FileHandlePool::evict_lru_()
             cache_it != cache_.end() && cache_it->second.refcount == 0) {
             cache_.erase(cache_it); // destroys FileHandle -> flush_file
             lru_order_.erase(std::next(it).base());
-            return true;
+            return;
         }
     }
-    return false;
 }
