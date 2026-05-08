@@ -22,6 +22,7 @@ class Sink
      * @return True if the write was successful, false otherwise.
      */
     [[nodiscard]] virtual bool write(size_t offset, ConstByteSpan data) = 0;
+    [[nodiscard]] virtual size_t io_alignment() const { return 1; }
 
   protected:
     /**
@@ -70,7 +71,8 @@ construct_data_paths(std::string_view base_path,
  */
 std::unique_ptr<Sink>
 make_file_sink(std::string_view file_path,
-               std::shared_ptr<FileHandlePool> file_handle_pool);
+               std::shared_ptr<FileHandlePool> file_handle_pool,
+               bool aligned = false);
 
 /**
  * @brief Create a sink from an S3 bucket name and object key.

@@ -16,7 +16,7 @@ get_last_error_as_string()
 }
 
 void*
-make_flags()
+make_flags(bool /*aligned*/)
 {
     auto* flags = new int;
     *flags = O_WRONLY | O_CREAT;
@@ -39,6 +39,12 @@ get_max_active_handles()
         // rl.rlim_max gives hard limit
     }
     return 0; // error
+}
+
+uint64_t
+get_io_alignment()
+{
+    return 1;
 }
 
 void*
@@ -80,6 +86,12 @@ seek_and_write(void* handle, size_t offset, ConstByteSpan data)
     }
 
     return retries < max_retries;
+}
+
+bool
+seek_and_write_aligned(void* handle, size_t offset, ConstByteSpan data)
+{
+    return seek_and_write(handle, offset, data);
 }
 
 bool

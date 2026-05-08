@@ -15,10 +15,11 @@ namespace zarr {
 class FileHandle
 {
   public:
-    explicit FileHandle(const std::string& filename);
+    FileHandle(const std::string& filename, bool aligned);
     ~FileHandle(); // calls destroy_handle
 
     void* get() const;
+    bool is_aligned() const { return aligned_; }
 
     // not copyable or movable
     FileHandle(const FileHandle&) = delete;
@@ -28,6 +29,7 @@ class FileHandle
 
   private:
     void* handle_;
+    bool aligned_;
 };
 
 class FileHandlePool; // forward decl
@@ -65,8 +67,10 @@ class FileHandlePool
     FileHandlePool();
     ~FileHandlePool() = default;
 
-    BorrowedHandle get_handle(const std::string& filename);
+    BorrowedHandle get_handle(const std::string& filename, bool aligned);
     void return_handle(const std::string& filename);
+
+    uint64_t io_alignment() const { return io_alignment_; }
 
   private:
     struct CacheEntry
@@ -77,6 +81,7 @@ class FileHandlePool
     };
 
     const uint64_t max_active_handles_;
+    const uint64_t io_alignment_;
     std::list<std::string> lru_order_; // front = most recent
     std::unordered_map<std::string, CacheEntry> cache_;
     bool cache_space_available_;

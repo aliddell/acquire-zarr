@@ -65,12 +65,16 @@ zarr::Shard::compress_and_write_chunk(
 
     extents_[internal_index] = buffer.size();
 
+    const size_t alignment = sink_->io_alignment();
+    const size_t aligned_size =
+      (buffer.size() + alignment - 1) & ~(alignment - 1);
+
     std::unique_lock lock(mutex_);
     const uint64_t offset = offsets_[internal_index] = file_offset_;
 
     // if this write fails, the file offset will still be incremented by the
     // size of this chunk, so we can come back later and retry it
-    file_offset_ += buffer.size();
+    file_offset_ += aligned_size;
 
     lock.unlock();
     bool res = sink_->write(offset, buffer);
@@ -117,7 +121,7 @@ zarr::Shard::make_sink_()
     if (s3_connection_pool_) {
         sink_ = make_s3_sink(*bucket_name_, path_, s3_connection_pool_);
     } else {
-        sink_ = make_file_sink(path_, file_handle_pool_);
+        sink_ = make_file_sink(path_, file_handle_pool_, true);
     }
 }
 
@@ -126,17 +130,26 @@ zarr::Shard::write_table_()
 {
     const size_t n_chunks = offsets_.size();
     const size_t table_size_bytes = 2 * n_chunks * sizeof(uint64_t);
-    std::vector<uint8_t> table(table_size_bytes + sizeof(uint32_t));
-    auto* table_ptr = table.data();
+    const size_t raw_size = table_size_bytes + sizeof(uint32_t);
+
+    // For aligned I/O the table must end at a page boundary so readers can
+    // locate it as the last raw_size bytes of the file. Front-pad with zeros
+    // so the table occupies the tail of the aligned write. When io_alignment()
+    // is 1 (non-aligned sink), pad is 0 and behaviour is unchanged.
+    const size_t alignment = sink_->io_alignment();
+    const size_t aligned_size = (raw_size + alignment - 1) & ~(alignment - 1);
+    const size_t pad = aligned_size - raw_size;
+
+    std::vector<uint8_t> table(aligned_size, 0);
+    auto* table_ptr = table.data() + pad;
 
     auto* table_u64 = reinterpret_cast<uint64_t*>(table_ptr);
-
-    for (auto i = 0; i < n_chunks; ++i) {
+    for (size_t i = 0; i < n_chunks; ++i) {
         table_u64[2 * i] = offsets_[i];
         table_u64[2 * i + 1] = extents_[i];
     }
 
-    // compute crc32 checksum of the table
+    // checksum covers only the table data, not the leading padding
     auto* checksum = reinterpret_cast<uint32_t*>(table_ptr + table_size_bytes);
     *checksum = crc32c::Crc32c(table_ptr, table_size_bytes);
 

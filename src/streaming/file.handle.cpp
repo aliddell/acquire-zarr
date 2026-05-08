@@ -15,15 +15,19 @@ flush_file(void* handle);
 uint64_t
 get_max_active_handles();
 
+uint64_t
+get_io_alignment();
+
 void*
-make_flags();
+make_flags(bool aligned);
 
 void
 destroy_flags(const void*);
 
-zarr::FileHandle::FileHandle(const std::string& filename)
+zarr::FileHandle::FileHandle(const std::string& filename, bool aligned)
+  : aligned_(aligned)
 {
-    const void* flags = make_flags();
+    const void* flags = make_flags(aligned);
     handle_ = init_handle(filename, flags);
     destroy_flags(flags);
 }
@@ -41,6 +45,7 @@ zarr::FileHandle::get() const
 
 zarr::FileHandlePool::FileHandlePool()
   : max_active_handles_(get_max_active_handles())
+  , io_alignment_(get_io_alignment())
   , cache_space_available_(true)
 {
 }
@@ -53,7 +58,7 @@ zarr::BorrowedHandle::~BorrowedHandle()
 }
 
 zarr::BorrowedHandle
-zarr::FileHandlePool::get_handle(const std::string& filename)
+zarr::FileHandlePool::get_handle(const std::string& filename, bool aligned)
 {
     std::unique_lock lock(mutex_);
 
@@ -69,7 +74,7 @@ zarr::FileHandlePool::get_handle(const std::string& filename)
         auto [new_it, _] =
           cache_.emplace(filename,
                          CacheEntry{
-                           .handle = std::make_shared<FileHandle>(filename),
+                           .handle = std::make_shared<FileHandle>(filename, aligned),
                            .lru_it = lru_order_.begin(),
                            .refcount = 0,
                          });

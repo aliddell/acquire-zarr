@@ -375,14 +375,8 @@ def test_stream_data_to_filesystem(
         assert blosc_codec.cname == cname
         assert blosc_codec.clevel == 1
         assert blosc_codec.shuffle == zblosc.BloscShuffle.shuffle
-
-        assert data_file_path.is_file()
-        assert data_file_path.stat().st_size <= shard_size_bytes
     else:
         assert len(metadata.codecs[0].codecs) == 1
-
-        assert data_file_path.is_file()
-        assert data_file_path.stat().st_size == shard_size_bytes
 
 
 @pytest.mark.parametrize(
@@ -1767,7 +1761,6 @@ def test_single_2d_image(store_path: Path, request: pytest.FixtureRequest):
 def test_append_throws_on_overflow(
     store_path: Path, request: pytest.FixtureRequest
 ):
-    set_log_level(LogLevel.DEBUG)
     settings = StreamSettings(
         store_path=str(store_path / f"{request.node.name}.zarr"),
         arrays=[

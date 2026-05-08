@@ -18,7 +18,9 @@ main()
         {
             char str[] = "Hello, Acquire!";
             auto sink = std::make_unique<zarr::FileSink>(
-              tmp_path.string(), std::make_shared<zarr::FileHandlePool>());
+              tmp_path.string(),
+              std::make_shared<zarr::FileHandlePool>(),
+              false);
 
             std::span data = { reinterpret_cast<uint8_t*>(str),
                                sizeof(str) - 1 };
@@ -44,8 +46,7 @@ main()
         retval = 1;
     }
 
-    std::error_code ec;
-    if (!fs::remove(tmp_path, ec)) {
+    if (std::error_code ec; !fs::remove(tmp_path, ec)) {
         LOG_ERROR("Failed to remove file: ", ec.message());
         retval = 1;
     }
