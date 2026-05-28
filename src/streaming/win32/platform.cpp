@@ -43,28 +43,38 @@ make_flags()
 }
 
 void
-destroy_flags(void* flags)
+destroy_flags(const void* flags)
 {
-    const auto* fd = static_cast<DWORD*>(flags);
+    const auto* fd = static_cast<const DWORD*>(flags);
     delete fd;
 }
 
 uint64_t
 get_max_active_handles()
 {
-    return _getmaxstdio();
+    // We open files via CreateFileA, which returns a Win32 HANDLE backed by
+    // the per-process kernel-object quota -- not by the CRT file-descriptor
+    // table that _getmaxstdio() reports. The kernel ceiling is documented at
+    // 16,777,216 per process; the practical ceiling (limited by kernel pool
+    // memory) is in the 10,000s on typical systems. There is no setrlimit
+    // analogue on Win32, so this is a self-imposed throttle rather than a
+    // system fact; pick a number that's well under the kernel ceiling but
+    // high enough that the pool isn't the bottleneck for concurrent shards.
+    // CreateFile will return INVALID_HANDLE_VALUE with
+    // ERROR_TOO_MANY_OPEN_FILES if we ever do hit the kernel limit.
+    return 8192;
 }
 
 void*
-init_handle(const std::string& filename, void* flags)
+init_handle(const std::string& filename, const void* flags)
 {
     auto* fd = new HANDLE;
     *fd = CreateFileA(filename.c_str(),
                       GENERIC_WRITE,
-                      0, // No sharing
+                      FILE_SHARE_WRITE,
                       nullptr,
                       OPEN_ALWAYS,
-                      *static_cast<DWORD*>(flags),
+                      *static_cast<const DWORD*>(flags),
                       nullptr);
 
     if (*fd == INVALID_HANDLE_VALUE) {

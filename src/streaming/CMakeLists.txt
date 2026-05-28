@@ -11,8 +11,6 @@ add_library(${tgt}
         acquire.zarr.cpp
         array.dimensions.hh
         array.dimensions.cpp
-        locked.buffer.hh
-        locked.buffer.cpp
         frame.queue.hh
         frame.queue.cpp
         downsampler.hh
@@ -46,6 +44,10 @@ add_library(${tgt}
         multiscale.array.cpp
         plate.hh
         plate.cpp
+        chunk.hh
+        chunk.cpp
+        shard.hh
+        shard.cpp
         $<TARGET_OBJECTS:acquire-logger-obj>
 )
 

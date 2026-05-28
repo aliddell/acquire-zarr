@@ -1,11 +1,11 @@
 #pragma once
 
 #include "array.base.hh"
-#include "blosc.compression.params.hh"
+#include "chunk.hh"
 #include "definitions.hh"
 #include "file.sink.hh"
-#include "locked.buffer.hh"
 #include "s3.connection.hh"
+#include "shard.hh"
 #include "thread.pool.hh"
 
 namespace zarr {
@@ -21,15 +21,23 @@ class Array : public ArrayBase
 
     size_t memory_usage() const noexcept override;
 
-    [[nodiscard]] WriteResult write_frame(LockedBuffer&,
-                                          size_t& bytes_written) override;
+    [[nodiscard]] WriteResult write_frame(std::vector<uint8_t>& frame,
+                                          size_t& bytes_written,
+                                          uint64_t frame_id) override;
     size_t max_bytes() const override;
 
   protected:
-    std::vector<LockedBuffer> chunk_buffers_;
+    std::vector<std::shared_ptr<Chunk>> chunks_;
+    mutable std::vector<std::mutex> chunk_mutexes_;
+
+    std::vector<std::shared_ptr<Shard>> shards_;
+    std::mutex shards_mutex_;
+
+    std::atomic<size_t> write_counter_;
+    std::mutex write_counter_mutex_;
+    std::condition_variable write_counter_cv_;
 
     std::vector<std::string> data_paths_;
-    std::unordered_map<std::string, std::unique_ptr<Sink>> data_sinks_;
 
     const uint64_t max_bytes_;       // max number of bytes that can be written
     const uint64_t bytes_per_frame_; // number of bytes per frame
@@ -39,26 +47,23 @@ class Array : public ArrayBase
     std::string data_root_;
     bool is_closing_;
 
+    uint64_t last_successful_frame_id_;
     uint32_t current_layer_;
-    std::vector<size_t> shard_file_offsets_;
-    std::vector<std::vector<uint64_t>> shard_tables_;
 
     bool make_metadata_(nlohmann::json& metadata) override;
     [[nodiscard]] bool close_() override;
-    [[nodiscard]] bool close_impl_();
 
     bool is_s3_array_() const;
 
-    void make_data_paths_();
-    [[nodiscard]] std::unique_ptr<Sink> make_data_sink_(std::string_view path) const;
-    void fill_buffers_();
+    void make_shards_();
+    [[nodiscard]] std::unique_ptr<Sink> make_data_sink_(
+      std::string_view path) const;
 
     bool should_flush_() const;
     bool should_rollover_() const;
 
-    size_t write_frame_to_chunks_(LockedBuffer& data);
+    size_t write_frame_to_chunks_(std::vector<uint8_t>& frame);
 
-    [[nodiscard]] ByteVector consolidate_chunks_(uint32_t shard_index);
     [[nodiscard]] bool compress_and_flush_data_();
     void rollover_();
     void close_sinks_();

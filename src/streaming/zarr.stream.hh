@@ -6,7 +6,6 @@
 #include "downsampler.hh"
 #include "file.handle.hh"
 #include "frame.queue.hh"
-#include "locked.buffer.hh"
 #include "multiscale.array.hh"
 #include "plate.hh"
 #include "s3.connection.hh"
@@ -62,14 +61,16 @@ struct ZarrStream_s
     size_t get_memory_usage() const noexcept;
 
   private:
-    struct ZarrOutputArray
+    struct OutputArray
     {
-        std::string output_key;
-        zarr::LockedBuffer frame_buffer;
+        std::string key;
+        std::vector<uint8_t> frame_buffer;
         size_t frame_buffer_offset;
+        size_t frame_size_bytes;
         std::unique_ptr<zarr::ArrayBase> array;
-        size_t max_bytes;
+        size_t max_array_size_bytes;
         size_t bytes_written;
+        uint64_t frames_queued;
     };
 
     std::string error_; // error message. If nonempty, an error occurred.
@@ -81,7 +82,7 @@ struct ZarrStream_s
     std::unordered_map<std::string, zarr::Plate> plates_;
     std::unordered_map<std::string, const zarr::Well&> wells_;
 
-    std::unordered_map<std::string, ZarrOutputArray> output_arrays_;
+    std::unordered_map<std::string, std::unique_ptr<OutputArray>> arrays_;
     std::vector<std::string> intermediate_group_paths_;
 
     std::mutex frame_queue_mutex_;
@@ -105,8 +106,7 @@ struct ZarrStream_s
      * @param settings Struct containing settings to validate.
      * @return true if settings are valid, false otherwise.
      */
-    [[nodiscard]] bool validate_settings_(
-      const struct ZarrStreamSettings_s* settings);
+    [[nodiscard]] bool validate_settings_(const ZarrStreamSettings* settings);
 
     /**
      * @brief Configure the stream for an array.
@@ -135,8 +135,7 @@ struct ZarrStream_s
      * @return True if the output node was created successfully, false
      * otherwise.
      */
-    [[nodiscard]] bool commit_settings_(
-      const struct ZarrStreamSettings_s* settings);
+    [[nodiscard]] bool commit_settings_(const ZarrStreamSettings* settings);
 
     /**
      * @brief Spin up the thread pool.
@@ -173,8 +172,8 @@ struct ZarrStream_s
     /** @brief Wait for the frame queue to finish processing. */
     void finalize_frame_queue_();
 
-    friend bool finalize_stream(struct ZarrStream_s* stream);
+    friend bool finalize_stream(ZarrStream* stream);
 };
 
 bool
-finalize_stream(struct ZarrStream_s* stream);
+finalize_stream(ZarrStream* stream);

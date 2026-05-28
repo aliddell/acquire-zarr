@@ -182,6 +182,10 @@ class ArrayDimensions
     std::vector<uint32_t> chunk_indices_for_shard_layer(uint32_t shard_index,
                                                         uint32_t layer) const;
 
+    std::vector<uint32_t> skipped_internal_indices_for_shard_layer(
+      uint32_t shard_index,
+      uint32_t layer) const;
+
     /**
      * @brief Get the streaming index of a chunk within a shard.
      * @param chunk_index The index of the chunk.
