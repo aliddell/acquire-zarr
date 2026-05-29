@@ -69,7 +69,7 @@ target_link_libraries(${tgt} PRIVATE
 )
 
 target_compile_definitions(${tgt} PRIVATE
-        "ACQUIRE_ZARR_API_VERSION=\"0.7.0\""
+        "ACQUIRE_ZARR_API_VERSION=\"0.8.0\""
 )
 
 set_target_properties(${tgt} PROPERTIES

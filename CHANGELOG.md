@@ -5,26 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.8.0] - [2026-05-29](https://github.com/acquire-project/acquire-zarr/compare/v0.7.0...v0.8.0)
 
 ### Added
 
 - `max_levels` field on `ZarrArraySettings` (C API) and `ArraySettings` (Python) to cap the maximum number of
-  downsampled pyramid levels; `0` means no limit (default)
+  downsampled pyramid levels; `0` means no limit (default) (#225)
 - Stock Zstd compression codec support as a standalone codec without Blosc (#209)
 - Dockerfile for containerized builds (#207)
 
 ### Changed
 
+- `ZarrStream_write_custom_metadata` (C) and `stream.write_custom_metadata` (Python) signatures have changed: the
+  `custom_metadata` and `overwrite` parameters have been replaced with `array_key`, `metadata_key`, and `metadata`.
+  Custom metadata is now written under the `attributes` key of the target array or group's `zarr.json`, rather than
+  to a sidecar `acquire.json` file (#201)
 - Chunk sizes at downsampled pyramid levels are now preserved rather than clamped to the array size; a chunk larger
-  than the array produces a single partial chunk, which is valid in Zarr v3
-- Custom metadata is now written under the `attributes` key in `zarr.json` for the target array or group rather than
-  a sidecar file (#201)
+  than the array produces a single partial chunk, which is valid in Zarr v3 (#225)
+- Restored compression/write parallelism through a refactor of the chunk and shard write paths, reducing peak memory
+  usage and improving write throughput on multicore systems (#219)
 - Documented `output_key` and `downsampling_method` behavior (#206)
 
 ### Fixed
 
-- Frame-processing deadlock that could occur when an error was raised during processing (#216) (#221)
+- LOD1 pixel corruption when downsampling an odd-sized Z dimension and the downsampled writes crossed a shard
+  boundary on the append dimension (#228)
+- Frame-processing deadlock that could occur when an error was raised during processing, and a related worker-exit
+  deadlock where producers could block forever on a full frame queue after the worker had returned (#216, #221, #222)
 
 ## [0.7.0] - [2026-03-11](https://github.com/acquire-project/acquire-zarr/compare/v0.6.0...v0.7.0)
 

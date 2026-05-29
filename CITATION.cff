@@ -10,9 +10,10 @@ authors:
   given-names: Nathan
   orcid: 0000-0001-6236-9282
 cff-version: 1.2.0
-date-released: '2025-02-06'
-doi: 10.5280/zenodo.14828040
+date-released: '2026-05-29'
+doi: 10.5281/zenodo.14828040
 license:
 - apache-2.0
 title: 'acquire-zarr: Streaming directly to Zarr on the file system or cloud'
 type: software
+version: 0.8.0
