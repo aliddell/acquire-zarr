@@ -1309,11 +1309,27 @@ class PyZarrStream
             return;
         }
 
+        ZarrStatusCode status = ZarrStatusCode_Success;
         try {
-            stream_.reset(); // calls ZarrStream_destroy
+            // release ownership so the deleter does not also destroy the
+            // stream; ZarrStream_close finalizes, frees, and reports a failed
+            // flush (e.g. an I/O error on a network filesystem). It blocks on
+            // the queue drain + fsyncs, so drop the GIL while it runs.
+            ZarrStream* raw = stream_.release();
+            {
+                py::gil_scoped_release release;
+                status = ZarrStream_close(raw);
+            }
         } catch (const std::exception& exc) {
             std::string err =
               "Failed to close Zarr stream: " + std::string(exc.what());
+            PyErr_SetString(PyExc_RuntimeError, err.c_str());
+            throw py::error_already_set();
+        }
+
+        if (status != ZarrStatusCode_Success) {
+            std::string err = "Failed to close Zarr stream: " +
+                              std::string(Zarr_get_status_message(status));
             PyErr_SetString(PyExc_RuntimeError, err.c_str());
             throw py::error_already_set();
         }

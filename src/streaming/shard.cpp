@@ -30,19 +30,23 @@ zarr::Shard::Shard(const ShardConfig& config,
     }
 
     make_sink_();
+    CHECK(sink_);
 }
 
 zarr::Shard::~Shard()
 {
+    // Best-effort: complete shards finalize themselves from the last chunk
+    // writer (where a flush error can be returned to the caller), and the
+    // trailing partial shard is finalized explicitly at close. This only does
+    // real work when a shard is destroyed without either having happened (e.g.
+    // an aborted stream), and a flush error here cannot propagate.
     try {
         std::unique_lock lock(mutex_);
-        if (const bool res = table_flushed_ ? true : write_table_(); !res) {
-            LOG_ERROR("Failed to write shard table.");
+        if (!finalize_unlocked_()) {
+            LOG_ERROR("Failed to finalize shard ", path_);
         }
-
-        finalize_sink(std::move(sink_));
     } catch (const std::exception& exc) {
-        LOG_ERROR("Failed to finalize shard: ", exc.what());
+        LOG_ERROR("Failed to finalize shard ", path_, ": ", exc.what());
     }
 }
 
@@ -54,6 +58,16 @@ zarr::Shard::write_chunk(uint32_t internal_index,
            "Internal index ",
            internal_index,
            " out of bounds");
+
+    // re-entry after finalize_unlocked_ has released sink_ would null-deref
+    // below; return the cached result so a retrying caller exhausts into its
+    // Fatal path instead of crashing
+    {
+        std::unique_lock lock(mutex_);
+        if (finalized_) {
+            return finalize_ok_;
+        }
+    }
 
     uint64_t &offset = offsets_[internal_index],
              &extent = extents_[internal_index];
@@ -81,11 +95,12 @@ zarr::Shard::write_chunk(uint32_t internal_index,
 
     CHECK(unwritten_chunks_ > 0);
 
-    // last writer in the shard publishes the table
+    // last writer in the shard publishes the table and durably flushes the
+    // shard, so a flush failure surfaces as this job's result
     bool res = true;
     if (unwritten_chunks_.fetch_sub(1) == 1) {
         std::unique_lock lock(mutex_);
-        res = write_table_();
+        res = finalize_unlocked_();
     }
     cv_.notify_all();
 
@@ -95,6 +110,13 @@ zarr::Shard::write_chunk(uint32_t internal_index,
 bool
 zarr::Shard::skip_chunk(uint32_t internal_index)
 {
+    {
+        std::unique_lock lock(mutex_);
+        if (finalized_) {
+            return finalize_ok_;
+        }
+    }
+
     offsets_[internal_index] = kUnwrittenSentinel;
     extents_[internal_index] = kUnwrittenSentinel;
 
@@ -103,7 +125,7 @@ zarr::Shard::skip_chunk(uint32_t internal_index)
     bool res = true;
     if (unwritten_chunks_.fetch_sub(1) == 1) {
         std::unique_lock lock(mutex_);
-        res = write_table_();
+        res = finalize_unlocked_();
     }
     cv_.notify_all();
 
@@ -140,4 +162,35 @@ zarr::Shard::write_table_()
     *checksum = crc32c::Crc32c(table_ptr, table_size_bytes);
 
     return table_flushed_ = sink_->write(file_offset_, table);
+}
+
+bool
+zarr::Shard::finalize()
+{
+    std::unique_lock lock(mutex_);
+    return finalize_unlocked_();
+}
+
+bool
+zarr::Shard::finalize_unlocked_()
+{
+    if (finalized_) {
+        return finalize_ok_;
+    }
+    finalized_ = true;
+
+    bool ok = true;
+    if (!table_flushed_ && !write_table_()) {
+        LOG_ERROR("Failed to write shard table for ", path_);
+        ok = false;
+    }
+
+    // finalize_sink durably flushes (fsync / multipart completion) and releases
+    // the sink; a flush failure here is the signal that the shard did not land.
+    if (!finalize_sink(std::move(sink_))) {
+        LOG_ERROR("Failed to flush shard ", path_);
+        ok = false;
+    }
+
+    return finalize_ok_ = ok;
 }

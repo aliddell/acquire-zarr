@@ -1442,7 +1442,9 @@ ZarrStream_s::start_thread_pool_(uint32_t max_threads)
 void
 ZarrStream_s::set_error_(const std::string& msg)
 {
-    error_ = msg;
+    // never store an empty error: callers key "did something fail?" off a
+    // non-empty error_, so an empty message would read as a clean close
+    error_ = msg.empty() ? "Unspecified error during streaming" : msg;
     frame_queue_processing_done_ = true;
 }
 
@@ -1780,6 +1782,13 @@ finalize_stream(ZarrStream* stream)
     // shut down the thread pool, let everything after this run in the main
     // thread
     stream->thread_pool_->await_stop();
+
+    // a worker job (e.g. a shard flush during streaming) may have failed
+    // asynchronously; surface it rather than reporting a clean close
+    if (!stream->error_.empty()) {
+        LOG_ERROR("Error finalizing Zarr stream: ", stream->error_);
+        return false;
+    }
 
     for (auto& [key, output] : stream->arrays_) {
         if (!zarr::finalize_array(std::move(output->array))) {
