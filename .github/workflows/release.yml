@@ -74,6 +74,19 @@ jobs:
         run: |
           brew install libomp
 
+      # windows-latest ships Visual Studio 18, which CMake 3.31 has no generator
+      # for; set up MSVC and drive every cmake configure with Ninja.
+      - name: Set up MSVC environment
+        if: startsWith(matrix.platform, 'windows')
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Use Ninja generator on Windows
+        if: startsWith(matrix.platform, 'windows')
+        run: echo "CMAKE_GENERATOR=Ninja" >> "$GITHUB_ENV"
+        shell: bash
+
       - name: Build
         run: |
           cmake --preset=default -DVCPKG_TARGET_TRIPLET=${{matrix.vcpkg_triplet}} -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=Release
@@ -175,6 +188,19 @@ jobs:
             echo "ARCHFLAGS=-arch x86_64" >> $GITHUB_ENV
             echo "_PYTHON_HOST_PLATFORM=macosx-15.0-x86_64" >> $GITHUB_ENV
           fi
+
+      # see the C/C++ job: VS18 has no CMake 3.31 generator. Set up MSVC and
+      # tell scikit-build to drive the build with Ninja via CMAKE_GENERATOR.
+      - name: Set up MSVC environment
+        if: startsWith(matrix.platform, 'windows')
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Use Ninja generator on Windows
+        if: startsWith(matrix.platform, 'windows')
+        run: echo "CMAKE_GENERATOR=Ninja" >> "$GITHUB_ENV"
+        shell: bash
 
       - name: Build
         if: ${{ !startsWith(matrix.platform, 'ubuntu') }}
