@@ -385,6 +385,103 @@ def test_stream_data_to_filesystem(
         assert data_file_path.stat().st_size == shard_size_bytes
 
 
+@pytest.mark.parametrize("ragged", [False, True])
+def test_intermediate_dimension_courtesy_flush(store_path: Path, ragged: bool):
+    """Large intermediate z with append chunk 1: data round-trips and live
+    memory stays well below the full inner volume (czbiohub-sf/livescreen-acquisition#210).
+    """
+    Y, X, cz = 64, 64, 64
+    Z = 1000 if ragged else 1024  # ragged trailing band when not a multiple
+    dtype = np.uint16
+
+    # full timepoints, then a partial one to exercise the close-time flush
+    n_full_t = 2
+    partial_planes = (Z // 2) + 7
+    n_t = n_full_t + 1
+
+    arr = ArraySettings(
+        dimensions=[
+            Dimension(
+                name="t",
+                kind=DimensionType.TIME,
+                array_size_px=0,
+                chunk_size_px=1,
+                shard_size_chunks=1,
+            ),
+            Dimension(
+                name="z",
+                kind=DimensionType.SPACE,
+                array_size_px=Z,
+                chunk_size_px=cz,
+                shard_size_chunks=3,  # doesn't divide 16 chunks: tests padding
+            ),
+            Dimension(
+                name="y",
+                kind=DimensionType.SPACE,
+                array_size_px=Y,
+                chunk_size_px=Y,
+                shard_size_chunks=1,
+            ),
+            Dimension(
+                name="x",
+                kind=DimensionType.SPACE,
+                array_size_px=X,
+                chunk_size_px=X,
+                shard_size_chunks=1,
+            ),
+        ]
+    )
+    arr.data_type = dtype
+
+    s = StreamSettings()
+    s.store_path = str(store_path / "intermediate.zarr")
+    s.overwrite = True
+    s.arrays = [arr]
+
+    itemsize = np.dtype(dtype).itemsize
+    full_inner_volume = Z * Y * X * itemsize
+    band_bytes = cz * Y * X * itemsize
+    frame_bytes = Y * X * itemsize
+
+    # frame queue: 256 MiB clamped to [16, 512] frames
+    frame_queue_bytes = min(max((256 << 20) // frame_bytes, 16), 512) * frame_bytes
+
+    # the maximum reflects a single z band, not the whole volume
+    expected_max = frame_queue_bytes + band_bytes + frame_bytes
+    assert s.get_maximum_memory_usage() == expected_max
+
+    stream = ZarrStream(s)
+    assert stream
+
+    expected = np.zeros((n_t, Z, Y, X), dtype=dtype)
+    peak = 0
+
+    def write_t(t: int, n_planes: int):
+        nonlocal peak
+        for z in range(n_planes):
+            value = (t * Z + z) % np.iinfo(dtype).max
+            frame = np.full((Y, X), value, dtype=dtype)
+            expected[t, z] = frame
+            stream.append(frame)
+            peak = max(peak, stream.get_current_memory_usage())
+
+    for t in range(n_full_t):
+        write_t(t, Z)
+    write_t(n_full_t, partial_planes)  # trailing partial layer
+
+    stream.close()
+
+    # band-by-band flushing keeps live memory well under the full inner volume
+    assert peak < int(full_inner_volume * 0.75), (
+        f"peak memory {peak} not bounded below the full inner volume "
+        f"{full_inner_volume}"
+    )
+
+    array = zarr.open(s.store_path, mode="r")
+    assert array.shape == (n_t, Z, Y, X)
+    assert np.array_equal(array[:], expected)
+
+
 def _make_data(settings: StreamSettings) -> np.ndarray:
     return np.zeros(
         (

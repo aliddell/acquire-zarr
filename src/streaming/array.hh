@@ -50,6 +50,9 @@ class Array : public ArrayBase
     uint64_t last_successful_frame_id_;
     uint32_t current_layer_;
 
+    // dim-1 bands flushed so far in the current layer (banding only)
+    uint32_t flushed_band_count_;
+
     bool make_metadata_(nlohmann::json& metadata) override;
     [[nodiscard]] bool close_() override;
 
@@ -65,6 +68,28 @@ class Array : public ArrayBase
     size_t write_frame_to_chunks_(std::vector<uint8_t>& frame);
 
     [[nodiscard]] bool compress_and_flush_data_();
+
+    // Incremental flush along dimension 1, one chunk band at a time, to bound
+    // peak memory. Used when dimensions->supports_dim1_banding().
+    // @see czbiohub-sf/livescreen-acquisition#210
+    [[nodiscard]] bool flush_completed_bands_();
+    [[nodiscard]] bool flush_layer_remainder_();
+    [[nodiscard]] bool compress_and_flush_band_(uint32_t band_idx,
+                                                uint32_t n_bands);
+
+    // Compress and write (or skip-if-empty) one chunk, freeing its slot.
+    void dispatch_chunk_job_(std::shared_ptr<Shard> shard,
+                             uint32_t chunk_idx,
+                             uint32_t internal_idx,
+                             uint32_t shard_idx,
+                             uint32_t chunk_offset,
+                             size_t bytes_per_chunk,
+                             size_t bytes_per_px);
+    // Skip a ragged-padding slot to complete the shard's countdown.
+    void dispatch_skip_job_(std::shared_ptr<Shard> shard,
+                            uint32_t internal_idx,
+                            uint32_t shard_idx);
+
     void rollover_();
     void close_sinks_();
 
