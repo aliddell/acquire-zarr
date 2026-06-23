@@ -16,4 +16,4 @@ license:
 - apache-2.0
 title: 'acquire-zarr: Streaming directly to Zarr on the file system or cloud'
 type: software
-version: 0.8.0
+version: 0.8,1
