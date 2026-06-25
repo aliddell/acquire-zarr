@@ -8,6 +8,103 @@ import acquire_zarr as aqz
 import numpy as np
 
 
+CONFIG_YAML = """
+version: 1
+store_path: from-config.zarr
+overwrite: true
+max_threads: 4
+arrays:
+  - output_key: channel0
+    data_type: uint16
+    multiscale: true
+    downsampling_method: mean
+    compression:
+      compressor: blosc1
+      codec: blosc-zstd
+      level: 1
+      shuffle: 1
+    dimensions:
+      - {name: t, type: time,  array_size_px: 0,  chunk_size_px: 1,  shard_size_chunks: 1}
+      - {name: z, type: space, array_size_px: 10, chunk_size_px: 5,  shard_size_chunks: 1}
+      - {name: y, type: space, array_size_px: 48, chunk_size_px: 16, shard_size_chunks: 1, unit: micrometer, scale: 0.5}
+      - {name: x, type: space, array_size_px: 64, chunk_size_px: 16, shard_size_chunks: 1, unit: micrometer, scale: 0.5}
+"""
+
+CONFIG_JSON = """
+{
+  "version": 1,
+  "store_path": "from-config.zarr",
+  "overwrite": true,
+  "max_threads": 4,
+  "arrays": [
+    {
+      "output_key": "channel0",
+      "data_type": "uint16",
+      "multiscale": true,
+      "downsampling_method": "mean",
+      "compression": {"compressor": "blosc1", "codec": "blosc-zstd", "level": 1, "shuffle": 1},
+      "dimensions": [
+        {"name": "t", "type": "time",  "array_size_px": 0,  "chunk_size_px": 1,  "shard_size_chunks": 1},
+        {"name": "z", "type": "space", "array_size_px": 10, "chunk_size_px": 5,  "shard_size_chunks": 1},
+        {"name": "y", "type": "space", "array_size_px": 48, "chunk_size_px": 16, "shard_size_chunks": 1, "unit": "micrometer", "scale": 0.5},
+        {"name": "x", "type": "space", "array_size_px": 64, "chunk_size_px": 16, "shard_size_chunks": 1, "unit": "micrometer", "scale": 0.5}
+      ]
+    }
+  ]
+}
+"""
+
+
+def _assert_expected(s):
+    assert s.store_path == "from-config.zarr"
+    assert s.overwrite is True
+    assert s.max_threads == 4
+    assert len(s.arrays) == 1
+    a = s.arrays[0]
+    assert a.output_key == "channel0"
+    assert a.data_type == aqz.DataType.UINT16
+    assert a.downsampling_method == aqz.DownsamplingMethod.MEAN
+    assert a.compression is not None
+    assert a.compression.compressor == aqz.Compressor.BLOSC1
+    assert a.compression.codec == aqz.CompressionCodec.BLOSC_ZSTD
+    assert a.compression.level == 1
+    assert a.compression.shuffle == 1
+    assert len(a.dimensions) == 4
+    assert a.dimensions[0].name == "t"
+    assert a.dimensions[0].kind == aqz.DimensionType.TIME
+    assert a.dimensions[2].name == "y"
+    assert a.dimensions[2].unit == "micrometer"
+    assert a.dimensions[2].scale == 0.5
+
+
+@pytest.mark.parametrize("text", [CONFIG_YAML, CONFIG_JSON])
+def test_load_settings_from_string(text):
+    _assert_expected(aqz.StreamSettings.from_string(text))
+
+
+def test_config_round_trip(tmp_path):
+    base = aqz.StreamSettings.from_string(CONFIG_YAML)
+
+    # dump -> reload through both formats
+    _assert_expected(aqz.StreamSettings.from_string(base.to_yaml()))
+    _assert_expected(aqz.StreamSettings.from_string(base.to_json()))
+
+    # dump to file (format by extension) -> reload
+    for name in ("rt.yaml", "rt.json"):
+        path = tmp_path / name
+        base.to_file(str(path))
+        _assert_expected(aqz.StreamSettings.from_file(str(path)))
+
+
+def test_load_settings_rejects_malformed():
+    with pytest.raises(ValueError):
+        aqz.StreamSettings.from_string("version: 1\nstore_path: x\n")  # no arrays
+    with pytest.raises(ValueError):
+        aqz.StreamSettings.from_string(
+            "store_path: x\narrays:\n  - data_type: float128\n    dimensions: []\n"
+        )
+
+
 @pytest.fixture(scope="function")
 def settings():
     return aqz.StreamSettings()

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Load and dump stream settings from YAML or JSON config files (JSON is parsed as a subset of YAML through one path).
+  C: `ZarrStreamSettings_load_from_file`/`_load_from_string` (freed with `ZarrStreamSettings_destroy_loaded`) and
+  `ZarrStreamSettings_dump_to_file`/`_dump_to_string`. Python: `StreamSettings.from_file`/`from_string` and
+  `to_file`/`to_yaml`/`to_json`. Covers arrays, dimensions, compression, S3 endpoint, multiscale, storage dimension
+  order, and HCS plates. Credentials are never read from config. See `examples/config/`
+
 ### Changed
 
 - Filesystem files are now opened with `FILE_SHARE_READ` on Windows, so another process (e.g. napari) can open the

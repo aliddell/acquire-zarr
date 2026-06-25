@@ -440,6 +440,23 @@ class StreamSettings:
     def get_array_keys(self) -> List[str]:
         """Get the list of array keys configured in this stream."""
 
+    @staticmethod
+    def from_file(path: str) -> "StreamSettings":
+        """Load stream settings from a YAML or JSON config file."""
+
+    @staticmethod
+    def from_string(text: str) -> "StreamSettings":
+        """Load stream settings from a YAML or JSON config string."""
+
+    def to_file(self, path: str) -> None:
+        """Dump settings to a config file (``.json`` -> JSON, else YAML)."""
+
+    def to_yaml(self) -> str:
+        """Serialize stream settings to a YAML string."""
+
+    def to_json(self) -> str:
+        """Serialize stream settings to a JSON string."""
+
 class Well:
     """Well configuration for HCS plate layouts.
 
