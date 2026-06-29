@@ -14,7 +14,7 @@ namespace fs = std::filesystem;
 namespace {
 const fs::path store = "config-test.zarr";
 
-const char* kYaml = R"(version: 1
+auto config_yaml = R"(version: 1
 store_path: config-test.zarr
 overwrite: true
 max_threads: 4
@@ -32,7 +32,7 @@ arrays:
       - {name: x, type: space, array_size_px: 64, chunk_size_px: 16, shard_size_chunks: 1, unit: micrometer, scale: 0.5}
 )";
 
-const char* kJson = R"({
+auto config_json = R"({
   "version": 1,
   "store_path": "config-test.zarr",
   "overwrite": true,
@@ -68,7 +68,8 @@ assert_expected(const ZarrStreamSettings& s)
 
     CHECK(a.compression_settings != nullptr);
     EXPECT_EQ(int, a.compression_settings->compressor, ZarrCompressor_Blosc1);
-    EXPECT_EQ(int, a.compression_settings->codec, ZarrCompressionCodec_BloscZstd);
+    EXPECT_EQ(
+      int, a.compression_settings->codec, ZarrCompressionCodec_BloscZstd);
     EXPECT_EQ(int, a.compression_settings->level, 1);
     EXPECT_EQ(int, a.compression_settings->shuffle, 1);
 
@@ -95,8 +96,11 @@ run_stream(ZarrStreamSettings* settings)
     std::vector<uint16_t> frame(48 * 64, 7);
     size_t bytes_out = 0;
     for (int i = 0; i < 10; ++i) { // one full z-stack at t=0
-        CHECK_OK(ZarrStream_append(
-          stream, frame.data(), frame.size() * sizeof(uint16_t), &bytes_out, nullptr));
+        CHECK_OK(ZarrStream_append(stream,
+                                   frame.data(),
+                                   frame.size() * sizeof(uint16_t),
+                                   &bytes_out,
+                                   nullptr));
     }
 
     CHECK_OK(ZarrStream_close(stream));
@@ -114,9 +118,9 @@ main()
     try {
         // both formats produce identical settings
         ZarrStreamSettings from_yaml{}, from_json{};
-        CHECK_OK(ZarrStreamSettings_load_from_string(&from_yaml, kYaml));
+        CHECK_OK(ZarrStreamSettings_load_from_string(&from_yaml, config_yaml));
         assert_expected(from_yaml);
-        CHECK_OK(ZarrStreamSettings_load_from_string(&from_json, kJson));
+        CHECK_OK(ZarrStreamSettings_load_from_string(&from_json, config_json));
         assert_expected(from_json);
 
         // round-trip through dump (YAML and JSON) reloads identically
@@ -143,12 +147,11 @@ main()
         EXPECT(ZarrStreamSettings_load_from_string(
                  &bad, "version: 1\nstore_path: x\n") != ZarrStatusCode_Success,
                "Expected failure: no arrays or plates");
-        EXPECT(
-          ZarrStreamSettings_load_from_string(
-            &bad,
-            "store_path: x\narrays:\n  - data_type: float128\n    dimensions: []\n") !=
-            ZarrStatusCode_Success,
-          "Expected failure: bad data_type");
+        EXPECT(ZarrStreamSettings_load_from_string(
+                 &bad,
+                 "store_path: x\narrays:\n  - data_type: float128\n    "
+                 "dimensions: []\n") != ZarrStatusCode_Success,
+               "Expected failure: bad data_type");
 
         retval = 0;
     } catch (const std::exception& e) {
