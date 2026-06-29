@@ -105,6 +105,52 @@ def test_load_settings_rejects_malformed():
         )
 
 
+def test_config_dict_round_trip():
+    base = aqz.StreamSettings.from_string(CONFIG_YAML)
+
+    d = base.to_dict()
+    assert isinstance(d, dict)
+    assert d["store_path"] == "from-config.zarr"
+    assert d["arrays"][0]["data_type"] == "uint16"
+
+    _assert_expected(aqz.StreamSettings.from_dict(d))
+
+
+HCS_YAML = """
+version: 1
+store_path: plate.zarr
+plates:
+  - path: test_plate
+    name: Test Plate
+    row_names: [C]
+    column_names: ["5"]
+    wells:
+      - row_name: C
+        column_name: "5"
+        images:
+          - path: fov1
+            array:
+              data_type: uint16
+              dimensions:
+                - {name: z, type: space, array_size_px: 0,  chunk_size_px: 1,  shard_size_chunks: 1}
+                - {name: y, type: space, array_size_px: 64, chunk_size_px: 64, shard_size_chunks: 1}
+                - {name: x, type: space, array_size_px: 64, chunk_size_px: 64, shard_size_chunks: 1}
+"""
+
+
+def test_yaml_dump_quotes_ambiguous_strings():
+    s = aqz.StreamSettings.from_string(HCS_YAML)
+    assert s.hcs_plates[0].wells[0].column_name == "5"
+
+    yaml = s.to_yaml()
+    # numeric-looking names are emitted quoted so they reload as strings
+    assert '"5"' in yaml
+
+    reloaded = aqz.StreamSettings.from_string(yaml)
+    assert reloaded.hcs_plates[0].wells[0].column_name == "5"
+    assert list(reloaded.hcs_plates[0].column_names) == ["5"]
+
+
 @pytest.fixture(scope="function")
 def settings():
     return aqz.StreamSettings()

@@ -448,6 +448,13 @@ class StreamSettings:
     def from_string(text: str) -> "StreamSettings":
         """Load stream settings from a YAML or JSON config string."""
 
+    @staticmethod
+    def from_dict(data: dict) -> "StreamSettings":
+        """Build stream settings from a config dict (same schema as files)."""
+
+    def to_dict(self) -> dict:
+        """Serialize stream settings to a config dict."""
+
     def to_file(self, path: str) -> None:
         """Dump settings to a config file (``.json`` -> JSON, else YAML)."""
 

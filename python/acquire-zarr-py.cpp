@@ -2560,7 +2560,25 @@ PYBIND11_MODULE(acquire_zarr, m)
         [](const PyZarrStreamSettings& self) {
             return dump_settings(self, ZarrConfigFormat_Json);
         },
-        "Serialize stream settings to a JSON string.");
+        "Serialize stream settings to a JSON string.")
+      .def_static(
+        "from_dict",
+        [](const py::object& data) {
+            const std::string text =
+              py::module::import("json").attr("dumps")(data).cast<std::string>();
+            ZarrStreamSettings c{};
+            auto status = ZarrStreamSettings_load_from_string(&c, text.c_str());
+            return finish_load(c, status, "config dict");
+        },
+        py::arg("data"),
+        "Build stream settings from a config dict (same schema as the files).")
+      .def(
+        "to_dict",
+        [](const PyZarrStreamSettings& self) {
+            const std::string text = dump_settings(self, ZarrConfigFormat_Json);
+            return py::module::import("json").attr("loads")(text);
+        },
+        "Serialize stream settings to a config dict.");
 
     py::class_<PyZarrStream>(m, "ZarrStream")
       .def(py::init<PyZarrStreamSettings>())

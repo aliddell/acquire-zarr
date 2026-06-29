@@ -14,7 +14,8 @@
 using json = nlohmann::json;
 
 // ---------------------------------------------------------------------------
-// YAML <-> JSON bridge (JSON is a subset of YAML, so one parse path serves both)
+// YAML <-> JSON bridge (JSON is a subset of YAML, so one parse path serves
+// both)
 // ---------------------------------------------------------------------------
 namespace {
 json
@@ -26,7 +27,8 @@ scalar_to_json(const YAML::Node& node)
     }
 
     // Strict JSON-style booleans only. yaml-cpp follows YAML 1.1, where y/yes/
-    // no/on/off are booleans -- that would turn a dimension named "y" into true.
+    // no/on/off are booleans -- that would turn a dimension named "y" into
+    // true.
     if (s == "true") {
         return true;
     }
@@ -78,44 +80,80 @@ yaml_to_json(const YAML::Node& node)
     return nullptr;
 }
 
-YAML::Node
-json_to_yaml_node(const json& doc)
+// A string needs quoting on emit iff loading it back would not yield a string
+// (mirrors scalar_to_json). Otherwise a well named "5" would round-trip to int.
+bool
+reparses_as_nonstring(const std::string& s)
 {
-    YAML::Node node;
+    if (s == "true" || s == "false") {
+        return true;
+    }
+    if (s.empty() || s == "~" || s == "null") {
+        return true;
+    }
+    const YAML::Node n(s);
+
+    if (int64_t i; YAML::convert<int64_t>::decode(n, i)) {
+        return true;
+    }
+
+    if (uint64_t u; YAML::convert<uint64_t>::decode(n, u)) {
+        return true;
+    }
+
+    if (double d; YAML::convert<double>::decode(n, d)) {
+        return true;
+    }
+
+    return false;
+}
+
+void
+emit_json(YAML::Emitter& e, const json& doc)
+{
     switch (doc.type()) {
-        case json::value_t::null:
-            node = YAML::Node(YAML::NodeType::Null);
-            break;
         case json::value_t::object:
+            e << YAML::BeginMap;
             for (const auto& [key, value] : doc.items()) {
-                node[key] = json_to_yaml_node(value);
+                e << YAML::Key << key << YAML::Value;
+                emit_json(e, value);
             }
+            e << YAML::EndMap;
             break;
         case json::value_t::array:
+            e << YAML::BeginSeq;
             for (const auto& value : doc) {
-                node.push_back(json_to_yaml_node(value));
+                emit_json(e, value);
             }
+            e << YAML::EndSeq;
             break;
-        case json::value_t::string:
-            node = doc.get<std::string>();
+        case json::value_t::string: {
+            const auto s = doc.get<std::string>();
+            if (reparses_as_nonstring(s)) {
+                e << YAML::DoubleQuoted; // one-shot: applies to the next scalar
+            }
+            e << s;
             break;
+        }
         case json::value_t::boolean:
-            node = doc.get<bool>();
+            e << doc.get<bool>();
             break;
         case json::value_t::number_integer:
-            node = doc.get<int64_t>();
+            e << doc.get<int64_t>();
             break;
         case json::value_t::number_unsigned:
-            node = doc.get<uint64_t>();
+            e << doc.get<uint64_t>();
             break;
         case json::value_t::number_float:
-            node = doc.get<double>();
+            e << doc.get<double>();
+            break;
+        case json::value_t::null:
+            e << YAML::Null;
             break;
         default:
-            node = doc.dump();
+            e << doc.dump();
             break;
     }
-    return node;
 }
 } // namespace
 
@@ -131,7 +169,7 @@ struct EnumEntry
     int value;
 };
 
-const EnumEntry kDataTypes[] = {
+constexpr EnumEntry kDataTypes[] = {
     { "uint8", ZarrDataType_uint8 },     { "uint16", ZarrDataType_uint16 },
     { "uint32", ZarrDataType_uint32 },   { "uint64", ZarrDataType_uint64 },
     { "int8", ZarrDataType_int8 },       { "int16", ZarrDataType_int16 },
@@ -139,27 +177,27 @@ const EnumEntry kDataTypes[] = {
     { "float32", ZarrDataType_float32 }, { "float64", ZarrDataType_float64 },
 };
 
-const EnumEntry kDimensionTypes[] = {
+constexpr EnumEntry kDimensionTypes[] = {
     { "space", ZarrDimensionType_Space },
     { "channel", ZarrDimensionType_Channel },
     { "time", ZarrDimensionType_Time },
     { "other", ZarrDimensionType_Other },
 };
 
-const EnumEntry kCompressors[] = {
+constexpr EnumEntry kCompressors[] = {
     { "none", ZarrCompressor_None },
     { "blosc1", ZarrCompressor_Blosc1 },
     { "zstd", ZarrCompressor_Zstd },
 };
 
-const EnumEntry kCodecs[] = {
+constexpr EnumEntry kCodecs[] = {
     { "none", ZarrCompressionCodec_None },
     { "blosc-lz4", ZarrCompressionCodec_BloscLZ4 },
     { "blosc-zstd", ZarrCompressionCodec_BloscZstd },
     { "zstd", ZarrCompressionCodec_Zstd },
 };
 
-const EnumEntry kDownsamplingMethods[] = {
+constexpr EnumEntry kDownsamplingMethods[] = {
     { "decimate", ZarrDownsamplingMethod_Decimate },
     { "mean", ZarrDownsamplingMethod_Mean },
     { "min", ZarrDownsamplingMethod_Min },
@@ -187,8 +225,8 @@ from_enum(const EnumEntry (&table)[N], int value, const char* what)
             return e.name;
         }
     }
-    throw std::runtime_error("unmappable " + std::string(what) + " value: " +
-                             std::to_string(value));
+    throw std::runtime_error("unmappable " + std::string(what) +
+                             " value: " + std::to_string(value));
 }
 
 [[noreturn]] void
@@ -318,42 +356,59 @@ alloc_zeroed(size_t n)
 // ---------------------------------------------------------------------------
 namespace {
 void
-load_dimension(const json& j, ZarrDimensionProperties* dim, const std::string& ctx)
+load_dimension(const json& j,
+               ZarrDimensionProperties* dim,
+               const std::string& ctx)
 {
     dim->name = dup_cstr(as_string(require(j, "name", ctx), ctx + ".name"));
-    dim->type = static_cast<ZarrDimensionType>(to_enum(
-      kDimensionTypes, as_string(require(j, "type", ctx), ctx + ".type"), "dimension type"));
-    dim->array_size_px = as_u32(require(j, "array_size_px", ctx), ctx + ".array_size_px");
-    dim->chunk_size_px = as_u32(require(j, "chunk_size_px", ctx), ctx + ".chunk_size_px");
+    dim->type = static_cast<ZarrDimensionType>(
+      to_enum(kDimensionTypes,
+              as_string(require(j, "type", ctx), ctx + ".type"),
+              "dimension type"));
+    dim->array_size_px =
+      as_u32(require(j, "array_size_px", ctx), ctx + ".array_size_px");
+    dim->chunk_size_px =
+      as_u32(require(j, "chunk_size_px", ctx), ctx + ".chunk_size_px");
     dim->shard_size_chunks =
       as_u32(require(j, "shard_size_chunks", ctx), ctx + ".shard_size_chunks");
 
     if (j.contains("unit") && !j.at("unit").is_null()) {
         dim->unit = dup_cstr(as_string(j.at("unit"), ctx + ".unit"));
     }
-    dim->scale = j.contains("scale") ? as_double(j.at("scale"), ctx + ".scale") : 1.0;
+    dim->scale =
+      j.contains("scale") ? as_double(j.at("scale"), ctx + ".scale") : 1.0;
 }
 
 void
-load_array(const json& j, ZarrArraySettings* arr, const std::string& ctx, bool allow_output_key)
+load_array(const json& j,
+           ZarrArraySettings* arr,
+           const std::string& ctx,
+           bool allow_output_key)
 {
-    if (allow_output_key && j.contains("output_key") && !j.at("output_key").is_null()) {
-        arr->output_key = dup_cstr(as_string(j.at("output_key"), ctx + ".output_key"));
+    if (allow_output_key && j.contains("output_key") &&
+        !j.at("output_key").is_null()) {
+        arr->output_key =
+          dup_cstr(as_string(j.at("output_key"), ctx + ".output_key"));
     }
 
-    arr->data_type = static_cast<ZarrDataType>(to_enum(
-      kDataTypes, as_string(require(j, "data_type", ctx), ctx + ".data_type"), "data type"));
+    arr->data_type = static_cast<ZarrDataType>(
+      to_enum(kDataTypes,
+              as_string(require(j, "data_type", ctx), ctx + ".data_type"),
+              "data type"));
 
-    arr->multiscale =
-      j.contains("multiscale") ? as_bool(j.at("multiscale"), ctx + ".multiscale") : false;
+    arr->multiscale = j.contains("multiscale")
+                        ? as_bool(j.at("multiscale"), ctx + ".multiscale")
+                        : false;
     arr->downsampling_method = static_cast<ZarrDownsamplingMethod>(
       j.contains("downsampling_method")
         ? to_enum(kDownsamplingMethods,
-                  as_string(j.at("downsampling_method"), ctx + ".downsampling_method"),
+                  as_string(j.at("downsampling_method"),
+                            ctx + ".downsampling_method"),
                   "downsampling method")
         : ZarrDownsamplingMethod_Decimate);
-    arr->max_levels =
-      j.contains("max_levels") ? as_u32(j.at("max_levels"), ctx + ".max_levels") : 0;
+    arr->max_levels = j.contains("max_levels")
+                        ? as_u32(j.at("max_levels"), ctx + ".max_levels")
+                        : 0;
 
     if (j.contains("compression") && !j.at("compression").is_null()) {
         const auto& c = j.at("compression");
@@ -361,15 +416,21 @@ load_array(const json& j, ZarrArraySettings* arr, const std::string& ctx, bool a
         auto* cs = alloc_zeroed<ZarrCompressionSettings>(1);
         arr->compression_settings = cs;
         cs->compressor = static_cast<ZarrCompressor>(to_enum(
-          kCompressors, as_string(require(c, "compressor", cctx), cctx + ".compressor"),
+          kCompressors,
+          as_string(require(c, "compressor", cctx), cctx + ".compressor"),
           "compressor"));
-        cs->codec = static_cast<ZarrCompressionCodec>(to_enum(
-          kCodecs, as_string(require(c, "codec", cctx), cctx + ".codec"), "codec"));
+        cs->codec = static_cast<ZarrCompressionCodec>(
+          to_enum(kCodecs,
+                  as_string(require(c, "codec", cctx), cctx + ".codec"),
+                  "codec"));
         cs->level =
-          c.contains("level") ? static_cast<uint8_t>(as_u32(c.at("level"), cctx + ".level")) : 0;
-        cs->shuffle = c.contains("shuffle")
-                        ? static_cast<uint8_t>(as_u32(c.at("shuffle"), cctx + ".shuffle"))
-                        : 0;
+          c.contains("level")
+            ? static_cast<uint8_t>(as_u32(c.at("level"), cctx + ".level"))
+            : 0;
+        cs->shuffle =
+          c.contains("shuffle")
+            ? static_cast<uint8_t>(as_u32(c.at("shuffle"), cctx + ".shuffle"))
+            : 0;
     }
 
     const auto& dims = require(j, "dimensions", ctx);
@@ -379,8 +440,9 @@ load_array(const json& j, ZarrArraySettings* arr, const std::string& ctx, bool a
     arr->dimension_count = dims.size();
     arr->dimensions = alloc_zeroed<ZarrDimensionProperties>(dims.size());
     for (size_t i = 0; i < dims.size(); ++i) {
-        load_dimension(
-          dims[i], &arr->dimensions[i], ctx + ".dimensions[" + std::to_string(i) + "]");
+        load_dimension(dims[i],
+                       &arr->dimensions[i],
+                       ctx + ".dimensions[" + std::to_string(i) + "]");
     }
 
     if (j.contains("storage_dimension_order") &&
@@ -407,7 +469,8 @@ load_acquisition(const json& j, ZarrHCSAcquisition* acq, const std::string& ctx)
         acq->name = dup_cstr(as_string(j.at("name"), ctx + ".name"));
     }
     if (j.contains("description") && !j.at("description").is_null()) {
-        acq->description = dup_cstr(as_string(j.at("description"), ctx + ".description"));
+        acq->description =
+          dup_cstr(as_string(j.at("description"), ctx + ".description"));
     }
     if (j.contains("start_time") && !j.at("start_time").is_null()) {
         acq->start_time = as_u64(j.at("start_time"), ctx + ".start_time");
@@ -424,17 +487,20 @@ load_fov(const json& j, ZarrHCSFieldOfView* fov, const std::string& ctx)
 {
     fov->path = dup_cstr(as_string(require(j, "path", ctx), ctx + ".path"));
     if (j.contains("acquisition_id") && !j.at("acquisition_id").is_null()) {
-        fov->acquisition_id = as_u32(j.at("acquisition_id"), ctx + ".acquisition_id");
+        fov->acquisition_id =
+          as_u32(j.at("acquisition_id"), ctx + ".acquisition_id");
         fov->has_acquisition_id = true;
     }
     fov->array_settings = alloc_zeroed<ZarrArraySettings>(1);
-    load_array(require(j, "array", ctx), fov->array_settings, ctx + ".array", false);
+    load_array(
+      require(j, "array", ctx), fov->array_settings, ctx + ".array", false);
 }
 
 void
 load_well(const json& j, ZarrHCSWell* well, const std::string& ctx)
 {
-    well->row_name = dup_cstr(as_string(require(j, "row_name", ctx), ctx + ".row_name"));
+    well->row_name =
+      dup_cstr(as_string(require(j, "row_name", ctx), ctx + ".row_name"));
     well->column_name =
       dup_cstr(as_string(require(j, "column_name", ctx), ctx + ".column_name"));
 
@@ -445,7 +511,9 @@ load_well(const json& j, ZarrHCSWell* well, const std::string& ctx)
     well->image_count = images.size();
     well->images = alloc_zeroed<ZarrHCSFieldOfView>(images.size());
     for (size_t i = 0; i < images.size(); ++i) {
-        load_fov(images[i], &well->images[i], ctx + ".images[" + std::to_string(i) + "]");
+        load_fov(images[i],
+                 &well->images[i],
+                 ctx + ".images[" + std::to_string(i) + "]");
     }
 }
 
@@ -481,7 +549,8 @@ load_plate(const json& j, ZarrHCSPlate* plate, const std::string& ctx)
         plate->name = dup_cstr(as_string(j.at("name"), ctx + ".name"));
     }
 
-    const auto rows = as_string_list(require(j, "row_names", ctx), ctx + ".row_names");
+    const auto rows =
+      as_string_list(require(j, "row_names", ctx), ctx + ".row_names");
     plate->row_count = rows.size();
     plate->row_names = dup_string_list(rows);
 
@@ -497,7 +566,9 @@ load_plate(const json& j, ZarrHCSPlate* plate, const std::string& ctx)
     plate->well_count = wells.size();
     plate->wells = alloc_zeroed<ZarrHCSWell>(wells.size());
     for (size_t i = 0; i < wells.size(); ++i) {
-        load_well(wells[i], &plate->wells[i], ctx + ".wells[" + std::to_string(i) + "]");
+        load_well(wells[i],
+                  &plate->wells[i],
+                  ctx + ".wells[" + std::to_string(i) + "]");
     }
 
     if (j.contains("acquisitions") && !j.at("acquisitions").is_null()) {
@@ -546,14 +617,15 @@ dump_array(const ZarrArraySettings& a, bool include_output_key)
     j["data_type"] = from_enum(kDataTypes, a.data_type, "data type");
     j["multiscale"] = a.multiscale;
     if (a.multiscale) {
-        j["downsampling_method"] =
-          from_enum(kDownsamplingMethods, a.downsampling_method, "downsampling method");
+        j["downsampling_method"] = from_enum(
+          kDownsamplingMethods, a.downsampling_method, "downsampling method");
         j["max_levels"] = a.max_levels;
     }
     if (a.compression_settings) {
         const auto& c = *a.compression_settings;
         j["compression"] = {
-            { "compressor", from_enum(kCompressors, c.compressor, "compressor") },
+            { "compressor",
+              from_enum(kCompressors, c.compressor, "compressor") },
             { "codec", from_enum(kCodecs, c.codec, "codec") },
             { "level", c.level },
             { "shuffle", c.shuffle },
@@ -650,7 +722,7 @@ std::string
 json_to_yaml(const json& doc)
 {
     YAML::Emitter emitter;
-    emitter << json_to_yaml_node(doc);
+    emit_json(emitter, doc);
     return emitter.c_str();
 }
 
@@ -668,25 +740,29 @@ json_to_settings(const json& doc, ZarrStreamSettings* out)
         const auto v = as_u64(doc.at("version"), "version");
         if (v != kSchemaVersion) {
             fail("version",
-                 "unsupported schema version " + std::to_string(v) + " (expected " +
-                   std::to_string(kSchemaVersion) + ")");
+                 "unsupported schema version " + std::to_string(v) +
+                   " (expected " + std::to_string(kSchemaVersion) + ")");
         }
     }
 
-    out->store_path = dup_cstr(as_string(require(doc, "store_path", ""), "store_path"));
-    out->overwrite = doc.contains("overwrite") ? as_bool(doc.at("overwrite"), "overwrite") : false;
-    out->max_threads =
-      doc.contains("max_threads")
-        ? static_cast<unsigned int>(as_u32(doc.at("max_threads"), "max_threads"))
-        : 0;
+    out->store_path =
+      dup_cstr(as_string(require(doc, "store_path", ""), "store_path"));
+    out->overwrite = doc.contains("overwrite")
+                       ? as_bool(doc.at("overwrite"), "overwrite")
+                       : false;
+    out->max_threads = doc.contains("max_threads")
+                         ? static_cast<unsigned int>(
+                             as_u32(doc.at("max_threads"), "max_threads"))
+                         : 0;
 
     if (doc.contains("s3") && !doc.at("s3").is_null()) {
         const auto& s = doc.at("s3");
         auto* s3 = alloc_zeroed<ZarrS3Settings>(1);
         out->s3_settings = s3;
-        s3->endpoint = dup_cstr(as_string(require(s, "endpoint", "s3"), "s3.endpoint"));
-        s3->bucket_name =
-          dup_cstr(as_string(require(s, "bucket_name", "s3"), "s3.bucket_name"));
+        s3->endpoint =
+          dup_cstr(as_string(require(s, "endpoint", "s3"), "s3.endpoint"));
+        s3->bucket_name = dup_cstr(
+          as_string(require(s, "bucket_name", "s3"), "s3.bucket_name"));
         if (s.contains("region") && !s.at("region").is_null()) {
             s3->region = dup_cstr(as_string(s.at("region"), "s3.region"));
         }
@@ -700,8 +776,10 @@ json_to_settings(const json& doc, ZarrStreamSettings* out)
         out->array_count = arrays.size();
         out->arrays = alloc_zeroed<ZarrArraySettings>(arrays.size());
         for (size_t i = 0; i < arrays.size(); ++i) {
-            load_array(
-              arrays[i], &out->arrays[i], "arrays[" + std::to_string(i) + "]", true);
+            load_array(arrays[i],
+                       &out->arrays[i],
+                       "arrays[" + std::to_string(i) + "]",
+                       true);
         }
     }
 
@@ -867,7 +945,8 @@ load_from(const std::string& text, ZarrStreamSettings* settings)
         zarr::json_to_settings(zarr::config_text_to_json(text), settings);
     } catch (const std::exception& exc) {
         LOG_ERROR("Failed to load settings: ", exc.what());
-        zarr::destroy_loaded_settings(settings); // release any partial allocation
+        zarr::destroy_loaded_settings(
+          settings); // release any partial allocation
         return ZarrStatusCode_InvalidSettings;
     }
     return ZarrStatusCode_Success;
@@ -945,8 +1024,9 @@ extern "C"
 
         try {
             const auto doc = zarr::settings_to_json(settings);
-            const std::string out =
-              format == ZarrConfigFormat_Json ? doc.dump(2) : zarr::json_to_yaml(doc);
+            const std::string out = format == ZarrConfigFormat_Json
+                                      ? doc.dump(2)
+                                      : zarr::json_to_yaml(doc);
 
             auto* buf = static_cast<char*>(std::malloc(out.size() + 1));
             if (!buf) {
