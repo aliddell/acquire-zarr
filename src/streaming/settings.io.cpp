@@ -208,6 +208,11 @@ constexpr EnumEntry kDownsamplingMethods[] = {
     { "max", ZarrDownsamplingMethod_Max },
 };
 
+constexpr EnumEntry kOMEVersions[] = {
+    { "0.5", ZarrOMEVersion_0_5 },
+    { "0.6", ZarrOMEVersion_0_6 },
+};
+
 template<size_t N>
 int
 to_enum(const EnumEntry (&table)[N], const std::string& s, const char* what)
@@ -478,6 +483,90 @@ load_array(const json& j,
               as_uint<uint64_t>(order[i], ctx + ".storage_dimension_order"));
         }
     }
+
+    if (j.contains("omero") && !j.at("omero").is_null()) {
+        const auto& o = j.at("omero");
+        const auto octx = ctx + ".omero";
+        auto* omero = alloc_zeroed<ZarrOMERenderingSettings>(1);
+        arr->omero = omero;
+
+        if (o.contains("id") && !o.at("id").is_null()) {
+            omero->id = dup_cstr(as_string(o.at("id"), octx + ".id"));
+        }
+        if (o.contains("name") && !o.at("name").is_null()) {
+            omero->name = dup_cstr(as_string(o.at("name"), octx + ".name"));
+        }
+
+        if (o.contains("rdefs") && !o.at("rdefs").is_null()) {
+            const auto& r = o.at("rdefs");
+            const auto rctx = octx + ".rdefs";
+            omero->has_rdefs = true;
+            if (r.contains("model") && !r.at("model").is_null()) {
+                omero->rdefs.model =
+                  dup_cstr(as_string(r.at("model"), rctx + ".model"));
+            }
+            omero->rdefs.default_t =
+              r.contains("defaultT")
+                ? as_uint<uint32_t>(r.at("defaultT"), rctx + ".defaultT")
+                : 0;
+            omero->rdefs.default_z =
+              r.contains("defaultZ")
+                ? as_uint<uint32_t>(r.at("defaultZ"), rctx + ".defaultZ")
+                : 0;
+        }
+
+        if (o.contains("channels") && !o.at("channels").is_null()) {
+            const auto& channels = o.at("channels");
+            if (!channels.is_array()) {
+                fail(octx + ".channels", "expected a list");
+            }
+            omero->channel_count = channels.size();
+            omero->channels = alloc_zeroed<ZarrOMEChannel>(channels.size());
+            for (size_t i = 0; i < channels.size(); ++i) {
+                const auto& c = channels[i];
+                const auto cctx =
+                  octx + ".channels[" + std::to_string(i) + "]";
+                auto& ch = omero->channels[i];
+
+                if (c.contains("label") && !c.at("label").is_null()) {
+                    ch.label =
+                      dup_cstr(as_string(c.at("label"), cctx + ".label"));
+                }
+                if (c.contains("color") && !c.at("color").is_null()) {
+                    ch.color =
+                      dup_cstr(as_string(c.at("color"), cctx + ".color"));
+                }
+
+                const auto& w = require(c, "window", cctx);
+                const auto wctx = cctx + ".window";
+                ch.window.min =
+                  as_double(require(w, "min", wctx), wctx + ".min");
+                ch.window.max =
+                  as_double(require(w, "max", wctx), wctx + ".max");
+                ch.window.start =
+                  as_double(require(w, "start", wctx), wctx + ".start");
+                ch.window.end =
+                  as_double(require(w, "end", wctx), wctx + ".end");
+
+                ch.active = c.contains("active")
+                              ? as_bool(c.at("active"), cctx + ".active")
+                              : false;
+                if (c.contains("family") && !c.at("family").is_null()) {
+                    ch.family =
+                      dup_cstr(as_string(c.at("family"), cctx + ".family"));
+                }
+                if (c.contains("coefficient") &&
+                    !c.at("coefficient").is_null()) {
+                    ch.coefficient =
+                      as_double(c.at("coefficient"), cctx + ".coefficient");
+                    ch.has_coefficient = true;
+                }
+                ch.inverted = c.contains("inverted")
+                                ? as_bool(c.at("inverted"), cctx + ".inverted")
+                                : false;
+            }
+        }
+    }
 }
 
 void
@@ -658,6 +747,53 @@ dump_array(const ZarrArraySettings& a, bool include_output_key)
             { "shuffle", c.shuffle },
         };
     }
+    if (a.omero) {
+        const auto& o = *a.omero;
+        json oj;
+        if (o.id) {
+            oj["id"] = o.id;
+        }
+        if (o.name) {
+            oj["name"] = o.name;
+        }
+        auto channels = json::array();
+        for (size_t i = 0; i < o.channel_count; ++i) {
+            const auto& c = o.channels[i];
+            json cj;
+            if (c.label) {
+                cj["label"] = c.label;
+            }
+            if (c.color) {
+                cj["color"] = c.color;
+            }
+            cj["window"] = {
+                { "min", c.window.min },
+                { "max", c.window.max },
+                { "start", c.window.start },
+                { "end", c.window.end },
+            };
+            cj["active"] = c.active;
+            if (c.family) {
+                cj["family"] = c.family;
+            }
+            if (c.has_coefficient) {
+                cj["coefficient"] = c.coefficient;
+            }
+            cj["inverted"] = c.inverted;
+            channels.push_back(cj);
+        }
+        oj["channels"] = channels;
+        if (o.has_rdefs) {
+            json rj;
+            if (o.rdefs.model) {
+                rj["model"] = o.rdefs.model;
+            }
+            rj["defaultT"] = o.rdefs.default_t;
+            rj["defaultZ"] = o.rdefs.default_z;
+            oj["rdefs"] = rj;
+        }
+        j["omero"] = oj;
+    }
     j["dimensions"] = json::array();
     for (size_t i = 0; i < a.dimension_count; ++i) {
         j["dimensions"].push_back(dump_dimension(a.dimensions[i]));
@@ -781,6 +917,12 @@ json_to_settings(const json& doc, ZarrStreamSettings* out)
                          ? static_cast<unsigned int>(
                              as_uint<uint32_t>(doc.at("max_threads"), "max_threads"))
                          : 0;
+    out->ome_version = static_cast<ZarrOMEVersion>(
+      doc.contains("ome_version")
+        ? to_enum(kOMEVersions,
+                  as_string(doc.at("ome_version"), "ome_version"),
+                  "OME version")
+        : ZarrOMEVersion_0_5);
 
     if (doc.contains("s3") && !doc.at("s3").is_null()) {
         const auto& s = doc.at("s3");
@@ -838,6 +980,7 @@ settings_to_json(const ZarrStreamSettings* s)
     doc["store_path"] = s->store_path ? s->store_path : "";
     doc["overwrite"] = s->overwrite;
     doc["max_threads"] = s->max_threads;
+    doc["ome_version"] = from_enum(kOMEVersions, s->ome_version, "OME version");
 
     if (s->s3_settings) {
         const auto& s3 = *s->s3_settings;
@@ -877,6 +1020,20 @@ free_array_contents(ZarrArraySettings* a)
     free_cstr(a->output_key);
     std::free(a->compression_settings);
     std::free(const_cast<size_t*>(a->storage_dimension_order));
+    if (a->omero) {
+        free_cstr(a->omero->id);
+        free_cstr(a->omero->name);
+        free_cstr(a->omero->rdefs.model);
+        if (a->omero->channels) {
+            for (size_t i = 0; i < a->omero->channel_count; ++i) {
+                free_cstr(a->omero->channels[i].label);
+                free_cstr(a->omero->channels[i].color);
+                free_cstr(a->omero->channels[i].family);
+            }
+            std::free(a->omero->channels);
+        }
+        std::free(a->omero);
+    }
     if (a->dimensions) {
         for (size_t i = 0; i < a->dimension_count; ++i) {
             free_cstr(a->dimensions[i].name);

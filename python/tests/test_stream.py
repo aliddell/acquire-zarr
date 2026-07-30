@@ -35,6 +35,11 @@ from acquire_zarr import (
     Well,
     FieldOfView,
     Acquisition,
+    OMEVersion,
+    OMEWindow,
+    OMEChannel,
+    OMERenderingDefs,
+    OMERenderingSettings,
     set_log_level,
     get_log_level,
 )
@@ -2184,3 +2189,102 @@ def test_multiscale_chunk_size_preserved(store_path: Path):
     assert lod1.shape == (4, 24, 32)
     # chunk_size_px=32 must be preserved even though y_array=24 < y_chunk=32
     assert lod1.chunks == (4, 32, 32)
+
+
+def test_omero_rendering_metadata(tmp_path):
+    """An array with omero rendering settings becomes an OME image group
+    with an `omero` block alongside `multiscales`."""
+    channels = [
+        OMEChannel(
+            label="red",
+            color="FF0000",
+            window=OMEWindow(min=0.0, max=65535.0, start=0.0, end=1500.0),
+            active=True,
+        ),
+        OMEChannel(
+            label="green",
+            color="00FF00",
+            window=OMEWindow(min=0.0, max=65535.0, start=0.0, end=2000.0),
+            active=True,
+            coefficient=1.0,
+        ),
+    ]
+    omero = OMERenderingSettings(
+        channels=channels,
+        name="test image",
+        rdefs=OMERenderingDefs(model="color"),
+    )
+
+    settings = StreamSettings()
+    settings.store_path = str(tmp_path / "omero.zarr")
+    settings.arrays = [
+        ArraySettings(
+            dimensions=[
+                Dimension(
+                    name="c",
+                    kind=DimensionType.CHANNEL,
+                    array_size_px=2,
+                    chunk_size_px=1,
+                    shard_size_chunks=2,
+                ),
+                Dimension(
+                    name="y",
+                    kind=DimensionType.SPACE,
+                    array_size_px=24,
+                    chunk_size_px=24,
+                    shard_size_chunks=1,
+                ),
+                Dimension(
+                    name="x",
+                    kind=DimensionType.SPACE,
+                    array_size_px=32,
+                    chunk_size_px=32,
+                    shard_size_chunks=1,
+                ),
+            ],
+            data_type=np.uint16,
+            omero=omero,
+        )
+    ]
+
+    stream = ZarrStream(settings)
+    stream.append(np.zeros((2, 24, 32), dtype=np.uint16))
+    stream.close()
+
+    group = zarr.open(settings.store_path, mode="r")
+    ome = group.attrs["ome"]
+
+    assert ome["version"] == "0.5"
+    assert "multiscales" in ome
+    assert "omero" in ome
+
+    o = ome["omero"]
+    assert o["name"] == "test image"
+    assert len(o["channels"]) == 2
+
+    assert o["channels"][0]["label"] == "red"
+    assert o["channels"][0]["color"] == "FF0000"
+    assert o["channels"][0]["active"] is True
+    assert o["channels"][0]["window"]["end"] == 1500.0
+    # has_coefficient was not set -> field omitted
+    assert "coefficient" not in o["channels"][0]
+
+    assert o["channels"][1]["label"] == "green"
+    assert o["channels"][1]["coefficient"] == 1.0
+
+    assert o["rdefs"]["model"] == "color"
+
+
+def test_ome_version_selector(tmp_path, settings):
+    """ome_version selects the emitted OME-NGFF version string."""
+    settings.store_path = str(tmp_path / "v06.zarr")
+    settings.arrays[0].data_type = np.uint8
+    settings.arrays[0].downsampling_method = DownsamplingMethod.MEAN
+    settings.ome_version = OMEVersion.V0_6
+
+    stream = ZarrStream(settings)
+    stream.append(np.zeros((32, 48, 64), dtype=np.uint8))
+    stream.close()
+
+    group = zarr.open(settings.store_path, mode="r")
+    assert group.attrs["ome"]["version"] == "0.6"

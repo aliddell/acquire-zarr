@@ -36,6 +36,20 @@ extern "C"
         ZarrVersionCount
     } ZarrVersion;
 
+    /**
+     * @brief The version of the OME-NGFF (OME-Zarr) metadata to emit.
+     * @details ZarrOMEVersion_0_5 is the default and targets the released
+     * OME-Zarr 0.5 specification. ZarrOMEVersion_0_6 opts in to the in-progress
+     * 0.6 metadata (RFC-5 coordinate systems and transformations); it is not
+     * yet finalized and may change until 0.6 is released.
+     */
+    typedef enum
+    {
+        ZarrOMEVersion_0_5 = 0,
+        ZarrOMEVersion_0_6,
+        ZarrOMEVersionCount
+    } ZarrOMEVersion;
+
     typedef enum
     {
         ZarrLogLevel_Debug = 0,
@@ -148,6 +162,64 @@ extern "C"
     } ZarrDimensionProperties;
 
     /**
+     * @brief Display window for an OME "omero" rendering channel.
+     * @details Maps to the omero channel `window` object. All four bounds are
+     * required when a channel is specified.
+     */
+    typedef struct
+    {
+        double min;   /**< Minimum possible pixel value. */
+        double max;   /**< Maximum possible pixel value. */
+        double start; /**< Display window lower bound. */
+        double end;   /**< Display window upper bound. */
+    } ZarrOMEWindow;
+
+    /**
+     * @brief A single channel of OME "omero" rendering metadata.
+     */
+    typedef struct
+    {
+        const char* label;    /**< Channel label. May be NULL. */
+        const char* color;    /**< Hex RGB color, e.g. "FF0000". May be NULL. */
+        ZarrOMEWindow window; /**< Display window. */
+        bool active;          /**< Whether the channel is displayed. */
+        const char* family;   /**< Transfer function family, e.g. "linear".
+                                   May be NULL. */
+        double coefficient;   /**< Display coefficient. */
+        bool has_coefficient; /**< Whether @p coefficient is set. If false,
+                                   the field is omitted (readers default to
+                                   1.0). */
+        bool inverted;        /**< Whether the lookup table is inverted. */
+    } ZarrOMEChannel;
+
+    /**
+     * @brief OME "omero" rendering defaults (the `rdefs` object).
+     */
+    typedef struct
+    {
+        const char* model;  /**< Rendering model: "color" or "greyscale".
+                                 May be NULL. */
+        uint32_t default_t; /**< Default timepoint index. */
+        uint32_t default_z; /**< Default z-plane index. */
+    } ZarrOMERenderingDefs;
+
+    /**
+     * @brief OME "omero" rendering metadata for an image (array).
+     * @note The channels array may be allocated with
+     * ZarrOMERenderingSettings_create_channel_array and freed with
+     * ZarrOMERenderingSettings_destroy_channel_array.
+     */
+    typedef struct
+    {
+        const char* id;           /**< Image identifier. May be NULL. */
+        const char* name;         /**< Image name. May be NULL. */
+        ZarrOMEChannel* channels; /**< Array of channel structs. */
+        size_t channel_count;     /**< Number of channel structs. */
+        ZarrOMERenderingDefs rdefs; /**< Rendering defaults. */
+        bool has_rdefs;             /**< Whether @p rdefs is emitted. */
+    } ZarrOMERenderingSettings;
+
+    /**
      * @brief Properties of a Zarr array.
      * @note The dimensions array may be allocated with
      * ZarrArraySettings_create_dimension_array and freed with
@@ -176,6 +248,9 @@ extern "C"
         uint32_t max_levels; /**< Maximum number of downsampled levels in the
                                   pyramid. 0 means no limit. */
         const size_t* storage_dimension_order;
+        ZarrOMERenderingSettings* omero; /**< Optional OME "omero" rendering
+                                              metadata for this image. NULL if
+                                              not set. */
     } ZarrArraySettings;
 
     /**

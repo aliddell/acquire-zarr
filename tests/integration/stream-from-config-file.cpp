@@ -18,6 +18,7 @@ auto config_yaml = R"(version: 1
 store_path: config-test.zarr
 overwrite: true
 max_threads: 4
+ome_version: "0.6"
 arrays:
   - data_type: uint16
     compression:
@@ -25,6 +26,13 @@ arrays:
       codec: blosc-zstd
       level: 1
       shuffle: 1
+    omero:
+      id: "1"
+      name: my image
+      channels:
+        - {label: red, color: "FF0000", window: {min: 0.0, max: 65535.0, start: 0.0, end: 1500.0}, active: true, coefficient: 1.0}
+        - {label: green, color: "00FF00", window: {min: 0.0, max: 65535.0, start: 0.0, end: 2000.0}, active: false}
+      rdefs: {model: color, defaultT: 0, defaultZ: 2}
     dimensions:
       - {name: t, type: time,  array_size_px: 0,  chunk_size_px: 5,  shard_size_chunks: 1}
       - {name: z, type: space, array_size_px: 10, chunk_size_px: 5,  shard_size_chunks: 1}
@@ -37,10 +45,20 @@ auto config_json = R"({
   "store_path": "config-test.zarr",
   "overwrite": true,
   "max_threads": 4,
+  "ome_version": "0.6",
   "arrays": [
     {
       "data_type": "uint16",
       "compression": {"compressor": "blosc1", "codec": "blosc-zstd", "level": 1, "shuffle": 1},
+      "omero": {
+        "id": "1",
+        "name": "my image",
+        "channels": [
+          {"label": "red", "color": "FF0000", "window": {"min": 0.0, "max": 65535.0, "start": 0.0, "end": 1500.0}, "active": true, "coefficient": 1.0},
+          {"label": "green", "color": "00FF00", "window": {"min": 0.0, "max": 65535.0, "start": 0.0, "end": 2000.0}, "active": false}
+        ],
+        "rdefs": {"model": "color", "defaultT": 0, "defaultZ": 2}
+      },
       "dimensions": [
         {"name": "t", "type": "time",  "array_size_px": 0,  "chunk_size_px": 5,  "shard_size_chunks": 1},
         {"name": "z", "type": "space", "array_size_px": 10, "chunk_size_px": 5,  "shard_size_chunks": 1},
@@ -57,6 +75,7 @@ assert_expected(const ZarrStreamSettings& s)
     EXPECT_STR_EQ(s.store_path, "config-test.zarr");
     CHECK(s.overwrite);
     EXPECT_EQ(unsigned, s.max_threads, 4u);
+    EXPECT_EQ(int, s.ome_version, ZarrOMEVersion_0_6);
     EXPECT_EQ(size_t, s.array_count, 1u);
     CHECK(s.s3_settings == nullptr);
     CHECK(s.hcs_settings == nullptr);
@@ -65,6 +84,27 @@ assert_expected(const ZarrStreamSettings& s)
     CHECK(a.output_key == nullptr);
     EXPECT_EQ(int, a.data_type, ZarrDataType_uint16);
     CHECK(!a.multiscale);
+
+    CHECK(a.omero != nullptr);
+    EXPECT_STR_EQ(a.omero->id, "1");
+    EXPECT_STR_EQ(a.omero->name, "my image");
+    EXPECT_EQ(size_t, a.omero->channel_count, 2u);
+
+    EXPECT_STR_EQ(a.omero->channels[0].label, "red");
+    EXPECT_STR_EQ(a.omero->channels[0].color, "FF0000");
+    CHECK(a.omero->channels[0].active);
+    CHECK(a.omero->channels[0].window.max == 65535.0);
+    CHECK(a.omero->channels[0].window.end == 1500.0);
+    CHECK(a.omero->channels[0].has_coefficient);
+    CHECK(a.omero->channels[0].coefficient == 1.0);
+
+    EXPECT_STR_EQ(a.omero->channels[1].label, "green");
+    CHECK(!a.omero->channels[1].active);
+    CHECK(!a.omero->channels[1].has_coefficient);
+
+    CHECK(a.omero->has_rdefs);
+    EXPECT_STR_EQ(a.omero->rdefs.model, "color");
+    EXPECT_EQ(uint32_t, a.omero->rdefs.default_z, 2u);
 
     CHECK(a.compression_settings != nullptr);
     EXPECT_EQ(int, a.compression_settings->compressor, ZarrCompressor_Blosc1);
