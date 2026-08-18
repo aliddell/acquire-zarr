@@ -474,7 +474,9 @@ def test_intermediate_dimension_courtesy_flush(store_path: Path, ragged: bool):
     frame_bytes = Y * X * itemsize
 
     # frame queue: 256 MiB clamped to [16, 512] frames
-    frame_queue_bytes = min(max((256 << 20) // frame_bytes, 16), 512) * frame_bytes
+    frame_queue_bytes = (
+        min(max((256 << 20) // frame_bytes, 16), 512) * frame_bytes
+    )
 
     # the maximum reflects a single z band, not the whole volume
     expected_max = frame_queue_bytes + band_bytes + frame_bytes
@@ -2211,6 +2213,7 @@ def test_omero_rendering_metadata(tmp_path):
     ]
     omero = OMERenderingSettings(
         channels=channels,
+        id=7,
         name="test image",
         rdefs=OMERenderingDefs(model="color"),
     )
@@ -2259,6 +2262,8 @@ def test_omero_rendering_metadata(tmp_path):
     assert "omero" in ome
 
     o = ome["omero"]
+    # id is an integer image ID, as every other omero producer writes it
+    assert o["id"] == 7
     assert o["name"] == "test image"
     assert len(o["channels"]) == 2
 
@@ -2273,6 +2278,71 @@ def test_omero_rendering_metadata(tmp_path):
     assert o["channels"][1]["coefficient"] == 1.0
 
     assert o["rdefs"]["model"] == "color"
+
+
+def _omero_stream_settings(tmp_path, omero):
+    settings = StreamSettings()
+    settings.store_path = str(tmp_path / "omero-invalid.zarr")
+    settings.arrays = [
+        ArraySettings(
+            dimensions=[
+                Dimension(
+                    name="c",
+                    kind=DimensionType.CHANNEL,
+                    array_size_px=2,
+                    chunk_size_px=1,
+                    shard_size_chunks=2,
+                ),
+                Dimension(
+                    name="y",
+                    kind=DimensionType.SPACE,
+                    array_size_px=24,
+                    chunk_size_px=24,
+                    shard_size_chunks=1,
+                ),
+                Dimension(
+                    name="x",
+                    kind=DimensionType.SPACE,
+                    array_size_px=32,
+                    chunk_size_px=32,
+                    shard_size_chunks=1,
+                ),
+            ],
+            data_type=np.uint16,
+            omero=omero,
+        )
+    ]
+    return settings
+
+
+def _channel(end=1500.0):
+    return OMEChannel(
+        label="red",
+        window=OMEWindow(min=0.0, max=65535.0, start=0.0, end=end),
+        active=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "omero,reason",
+    [
+        (OMERenderingSettings(), "no channels"),
+        (OMERenderingSettings(channels=[_channel()]), "count mismatch"),
+        (
+            OMERenderingSettings(
+                channels=[
+                    _channel(),
+                    OMEChannel(label="green", window=OMEWindow()),
+                ]
+            ),
+            "zeroed window",
+        ),
+    ],
+)
+def test_omero_invalid_settings_rejected(tmp_path, omero, reason):
+    """omero blocks that would emit unusable metadata are rejected up front."""
+    with pytest.raises(RuntimeError):
+        ZarrStream(_omero_stream_settings(tmp_path, omero))
 
 
 def test_ome_version_selector(tmp_path, settings):

@@ -8,7 +8,7 @@
 #include <blosc.h>
 
 #include <algorithm> // clamp
-#include <bit>        // bit_ceil
+#include <bit>       // bit_ceil
 #include <filesystem>
 #include <regex>
 #include <stack>
@@ -343,7 +343,9 @@ make_omero(const ZarrOMERenderingSettings* omero)
     }
 
     zarr::OMERendering out;
-    out.id = optional_cstr(omero->id);
+    if (omero->has_id) {
+        out.id = omero->id;
+    }
     out.name = optional_cstr(omero->name);
     out.has_rdefs = omero->has_rdefs;
     if (omero->has_rdefs) {
@@ -458,6 +460,51 @@ validate_dimension(const ZarrDimensionProperties* dimension,
 }
 
 [[nodiscard]] bool
+validate_omero(const ZarrArraySettings* settings, std::string& error)
+{
+    const auto* omero = settings->omero;
+
+    if (omero->channel_count == 0 || omero->channels == nullptr) {
+        error = "omero requires at least one channel";
+        return false;
+    }
+
+    // omero channels describe the Channel axis, so there must be exactly one
+    // per channel. An array with no Channel dimension has a single channel.
+    uint32_t expected_channels = 1;
+    for (size_t i = 0; i < settings->dimension_count; ++i) {
+        if (settings->dimensions[i].type == ZarrDimensionType_Channel) {
+            expected_channels = settings->dimensions[i].array_size_px;
+            break;
+        }
+    }
+
+    // an append dimension has size 0, i.e., unbounded; nothing to check against
+    if (expected_channels > 0 && omero->channel_count != expected_channels) {
+        error = "omero channel count (" + std::to_string(omero->channel_count) +
+                ") does not match the Channel dimension size (" +
+                std::to_string(expected_channels) + ")";
+        return false;
+    }
+
+    for (size_t i = 0; i < omero->channel_count; ++i) {
+        const auto& window = omero->channels[i].window;
+        const auto ctx = "omero channel " + std::to_string(i) + ": ";
+
+        if (window.max <= window.min) {
+            error = ctx + "window max must be greater than min";
+            return false;
+        }
+        if (window.end <= window.start) {
+            error = ctx + "window end must be greater than start";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+[[nodiscard]] bool
 validate_array_settings(const ZarrArraySettings* settings,
                         const std::string& parent_path,
                         std::string& error)
@@ -520,12 +567,8 @@ validate_array_settings(const ZarrArraySettings* settings,
         return false;
     }
 
-    if (settings->omero != nullptr) {
-        const auto* omero = settings->omero;
-        if (omero->channel_count > 0 && omero->channels == nullptr) {
-            error = "Null pointer: omero channels";
-            return false;
-        }
+    if (settings->omero != nullptr && !validate_omero(settings, error)) {
+        return false;
     }
 
     return true;
@@ -1148,8 +1191,8 @@ ZarrStream_s::validate_settings_(const ZarrStreamSettings* settings)
     }
 
     if (settings->ome_version >= ZarrOMEVersionCount) {
-        error_ = "Invalid OME version: " +
-                 std::to_string(settings->ome_version);
+        error_ =
+          "Invalid OME version: " + std::to_string(settings->ome_version);
         return false;
     }
 
@@ -1680,8 +1723,8 @@ ZarrStream_s::init_frame_queue_()
     // tiny frames don't explode the slot count and huge frames still get
     // enough buffering to absorb bursts.
     constexpr uint64_t buffer_size_bytes = 256ULL << 20;
-    const auto frame_count = std::clamp<uint64_t>(
-      buffer_size_bytes / frame_size_bytes, 16ULL, 512ULL);
+    const auto frame_count =
+      std::clamp<uint64_t>(buffer_size_bytes / frame_size_bytes, 16ULL, 512ULL);
 
     try {
         frame_queue_ =
