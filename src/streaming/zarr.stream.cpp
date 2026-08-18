@@ -1638,6 +1638,7 @@ ZarrStream_s::write_intermediate_metadata_()
       { "attributes", nlohmann::json::object() },
     });
     const std::string metadata_key = "zarr.json";
+    const std::string ome_version = zarr::ome_version_to_string(ome_version_);
     std::string metadata_str;
 
     for (const auto& parent_group_key : intermediate_group_paths_) {
@@ -1652,7 +1653,7 @@ ZarrStream_s::write_intermediate_metadata_()
 
             // not supported for Zarr V2 / NGFF 0.4
             plate_metadata["attributes"]["ome"] = {
-                { "version", "0.5" },
+                { "version", ome_version },
                 { "plate", plate.to_json() },
             };
 
@@ -1665,7 +1666,7 @@ ZarrStream_s::write_intermediate_metadata_()
 
             // not supported for Zarr V2 / NGFF 0.4
             well_metadata["attributes"]["ome"] = {
-                { "version", "0.5" },
+                { "version", ome_version },
                 { "well", well.to_json() },
             };
 

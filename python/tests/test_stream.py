@@ -1677,11 +1677,12 @@ def validate_plate_metadata(base_path: Path):
     assert ome["version"] == "0.5"
 
     plate = ome["plate"]
-    assert len(plate) == 7
+    assert len(plate) == 6
 
     # Validate plate fields
     assert plate["name"] == "Test Plate"
-    assert plate["version"] == "0.5"
+    # the version lives at ome.version, not inside the plate dict
+    assert "version" not in plate
     assert plate["field_count"] == 2
 
     # Validate acquisitions
@@ -1759,8 +1760,9 @@ def validate_well_metadata(base_path: Path):
         assert ome["version"] == "0.5"
 
         well = ome["well"]
-        assert len(well) == 2
-        assert well["version"] == "0.5"
+        assert len(well) == 1
+        # the version lives at ome.version, not inside the well dict
+        assert "version" not in well
 
         images = well["images"]
         assert len(images) == expected_image_counts[i]
