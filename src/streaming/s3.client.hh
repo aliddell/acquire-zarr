@@ -1,0 +1,176 @@
+#pragma once
+
+#include "definitions.hh"
+
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+
+namespace zarr {
+struct S3Settings
+{
+    std::string endpoint;
+    std::string bucket_name;
+    std::optional<std::string> region;
+};
+
+/**
+ * @brief A single append-only upload of one S3 object.
+ * @details Wraps one CRT PutObject meta request in async-write mode: the CRT
+ * splits the byte stream into parts, uploads them in parallel, retries failed
+ * parts, and completes the multipart upload, so the object size need not be
+ * known up front.
+ * @note Bytes must be appended in order, and only one append may be in flight
+ * at a time. This class will not serialize for you; see S3Sink, which reorders
+ * the concurrent out-of-order writes it receives before appending here.
+ */
+class S3Upload
+{
+  public:
+    ~S3Upload();
+
+    /**
+     * @brief Append @p data to the end of the object.
+     * @details Blocks until the CRT is ready to accept more data.
+     * @param data The bytes to append. May be any size.
+     * @returns True if the data was accepted, otherwise false.
+     */
+    [[nodiscard]] bool append(ConstByteSpan data);
+
+    /**
+     * @brief Signal end of data and wait for the object to be stored.
+     * @details Idempotent: subsequent calls return the first call's result.
+     * @returns True if and only if the object was stored successfully.
+     */
+    [[nodiscard]] bool finish();
+
+    /**
+     * @brief Cancel the upload, discarding any parts already uploaded.
+     */
+    void abort();
+
+  private:
+    friend class S3Client;
+
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+
+    explicit S3Upload(std::unique_ptr<Impl> impl);
+};
+
+/**
+ * @brief A thread-safe S3 client for one endpoint and region.
+ * @details Backed by a single CRT S3 client, which multiplexes any number of
+ * concurrent requests over connection and thread pools it owns. One instance is
+ * shared by every writer thread; unlike the connection pool this replaces,
+ * there is nothing to check out or return.
+ *
+ * Bucket addressing is chosen from the endpoint: virtual-host style for
+ * `*.amazonaws.com`, path style otherwise, since MinIO and most other
+ * S3-compatible servers require path style.
+ *
+ * Credentials come from the CRT's default chain (environment, AWS config
+ * profile, ECS, then IMDS) and are never taken from the public API.
+ */
+class S3Client
+{
+  public:
+    /**
+     * @brief Construct a client for the endpoint in @p settings.
+     * @param settings Endpoint, bucket and optional region. An absent region is
+     * signed as "us-east-1", which S3-compatible servers ignore.
+     * @throws std::runtime_error if the endpoint has no host, or if the
+     * underlying CRT client cannot be created.
+     */
+    explicit S3Client(const S3Settings& settings);
+    ~S3Client();
+
+    /* Bucket operations */
+
+    /**
+     * @brief Check whether a bucket exists.
+     * @param bucket_name The name of the bucket.
+     * @returns True if the bucket exists, otherwise false.
+     */
+    bool bucket_exists(std::string_view bucket_name);
+
+    /* Object operations */
+
+    /**
+     * @brief Check whether an object exists.
+     * @param bucket_name The name of the bucket containing the object.
+     * @param object_name The name of the object.
+     * @returns True if the object exists, otherwise false. An empty bucket or
+     * object name returns false rather than raising.
+     */
+    bool object_exists(std::string_view bucket_name,
+                       std::string_view object_name);
+
+    /**
+     * @brief Put an object in a single request.
+     * @details For objects small enough to be held in memory. Larger objects,
+     * and objects of unknown size, should use create_upload().
+     * @param bucket_name The name of the bucket to put the object in.
+     * @param object_name The name of the object.
+     * @param data The data to put in the object.
+     * @returns True if the object was stored, otherwise false.
+     * @throws std::runtime_error if the bucket name is empty, the object name
+     * is empty, or @p data is empty.
+     */
+    [[nodiscard]] bool put_object(std::string_view bucket_name,
+                                  std::string_view object_name,
+                                  ConstByteSpan data);
+
+    /**
+     * @brief Delete an object.
+     * @param bucket_name The name of the bucket containing the object.
+     * @param object_name The name of the object.
+     * @returns True if the object was successfully deleted, otherwise false.
+     * @throws std::runtime_error if the bucket name is empty or the object
+     * name is empty.
+     */
+    [[nodiscard]] bool delete_object(std::string_view bucket_name,
+                                     std::string_view object_name);
+
+    /**
+     * @brief Get an object's size in bytes.
+     * @details Provided, like object_exists() and delete_object(), so callers
+     * and tests can verify what was written; the streaming path does not use it.
+     * @param bucket_name The name of the bucket containing the object.
+     * @param object_name The name of the object.
+     * @returns The size in bytes, or nullopt if the object could not be reached.
+     * @throws std::runtime_error if the bucket name or object name is empty.
+     */
+    [[nodiscard]] std::optional<size_t> object_size(
+      std::string_view bucket_name,
+      std::string_view object_name);
+
+    /**
+     * @brief Fetch an object's contents.
+     * @param bucket_name The name of the bucket containing the object.
+     * @param object_name The name of the object.
+     * @returns The object's bytes, or nullopt if it could not be fetched.
+     * @throws std::runtime_error if the bucket name or object name is empty.
+     */
+    [[nodiscard]] std::optional<ByteVector> get_object(
+      std::string_view bucket_name,
+      std::string_view object_name);
+
+    /**
+     * @brief Begin a streaming upload of an object of unknown size.
+     * @param bucket_name The name of the bucket to put the object in.
+     * @param object_name The name of the object.
+     * @returns The upload, or nullptr if it could not be started.
+     * @throws std::runtime_error if the bucket name or object name is empty.
+     */
+    [[nodiscard]] std::unique_ptr<S3Upload> create_upload(
+      std::string_view bucket_name,
+      std::string_view object_name);
+
+  private:
+    struct Impl;
+
+    std::unique_ptr<Impl> impl_;
+};
+} // namespace zarr

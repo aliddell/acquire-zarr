@@ -8,7 +8,7 @@
 #include <blosc.h>
 
 #include <algorithm> // clamp
-#include <bit>        // bit_ceil
+#include <bit>       // bit_ceil
 #include <filesystem>
 #include <regex>
 #include <stack>
@@ -1258,11 +1258,8 @@ ZarrStream_s::configure_array_(const ZarrArraySettings* settings,
                                                 0,
                                                 0);
     try {
-        output->array = zarr::make_array(config,
-                                         thread_pool_,
-                                         file_handle_pool_,
-                                         s3_connection_pool_,
-                                         is_hcs_array);
+        output->array = zarr::make_array(
+          config, thread_pool_, file_handle_pool_, s3_client_, is_hcs_array);
     } catch (const std::exception& exc) {
         set_error_(exc.what());
     }
@@ -1453,13 +1450,16 @@ bool
 ZarrStream_s::create_store_(bool overwrite)
 {
     if (is_s3_acquisition_()) {
-        // spin up S3 connection pool
         try {
-            s3_connection_pool_ = std::make_shared<zarr::S3ConnectionPool>(
-              std::thread::hardware_concurrency(), *s3_settings_);
+            s3_client_ = std::make_shared<zarr::S3Client>(*s3_settings_);
         } catch (const std::exception& e) {
-            set_error_("Error creating S3 connection pool: " +
-                       std::string(e.what()));
+            set_error_("Error creating S3 client: " + std::string(e.what()));
+            return false;
+        }
+
+        if (!s3_client_->bucket_exists(s3_settings_->bucket_name)) {
+            set_error_("S3 bucket '" + s3_settings_->bucket_name +
+                       "' does not exist or is not accessible.");
             return false;
         }
     } else {
@@ -1562,12 +1562,17 @@ ZarrStream_s::write_intermediate_metadata_()
           reinterpret_cast<const uint8_t*>(metadata_str.data()),
           metadata_str.size());
 
-        const std::string sink_path =
-          store_path_ + "/" + relative_path + "/" + metadata_key;
+        // root group has an empty relative_path; can't regularize_key the
+        // join because store_path_ may be absolute (#247)
+        std::string sink_path = store_path_;
+        if (!relative_path.empty()) {
+            sink_path += "/" + relative_path;
+        }
+        sink_path += "/" + metadata_key;
         std::unique_ptr<zarr::Sink> metadata_sink;
         if (is_s3_acquisition_()) {
-            metadata_sink = zarr::make_s3_sink(
-              bucket_name.value(), sink_path, s3_connection_pool_);
+            metadata_sink =
+              zarr::make_s3_sink(bucket_name.value(), sink_path, s3_client_);
         } else {
             metadata_sink = zarr::make_file_sink(
               sink_path, file_handle_pool_, /*truncate_to_fit=*/true);
@@ -1607,8 +1612,8 @@ ZarrStream_s::init_frame_queue_()
     // tiny frames don't explode the slot count and huge frames still get
     // enough buffering to absorb bursts.
     constexpr uint64_t buffer_size_bytes = 256ULL << 20;
-    const auto frame_count = std::clamp<uint64_t>(
-      buffer_size_bytes / frame_size_bytes, 16ULL, 512ULL);
+    const auto frame_count =
+      std::clamp<uint64_t>(buffer_size_bytes / frame_size_bytes, 16ULL, 512ULL);
 
     try {
         frame_queue_ =

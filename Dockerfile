@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # ── vcpkg ────────────────────────────────────────────────────────────────────
 ENV VCPKG_ROOT=/opt/vcpkg
-RUN git clone https://github.com/microsoft/vcpkg.git "$VCPKG_ROOT" \
+RUN git clone https://github.com/microsoft/vcpkg.git -b 2026.07.29 --depth 1 "$VCPKG_ROOT" \
     && "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
 
 # ── build ────────────────────────────────────────────────────────────────────

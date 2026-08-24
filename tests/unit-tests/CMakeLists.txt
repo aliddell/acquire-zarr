@@ -14,10 +14,10 @@ set(tests
         thread-pool-push-to-job-queue
         resolve-max-threads
         construct-data-paths
-        s3-connection-bucket-exists
-        s3-connection-object-exists-check-false-positives
-        s3-connection-put-object
-        s3-connection-upload-multipart-object
+        s3-client-bucket-exists
+        s3-client-object-exists-check-false-positives
+        s3-client-put-object
+        s3-client-streaming-upload
         file-sink-write
         file-sink-close-on-destroy
         file-sink-reopen-after-close
@@ -25,6 +25,7 @@ set(tests
         shard-finalize
         s3-sink-write
         s3-sink-write-multipart
+        s3-sink-write-out-of-order
         array-write-even
         array-write-ragged-append-dim
         array-write-ragged-internal-dim
@@ -47,10 +48,10 @@ foreach (name ${tests})
             ${PROJECT_SOURCE_DIR}/include
             ${PROJECT_SOURCE_DIR}/src/logger
             ${PROJECT_SOURCE_DIR}/src/streaming
+            ${PROJECT_SOURCE_DIR}/tests
     )
     target_link_libraries(${tgt} PRIVATE
             acquire-zarr
-            miniocpp::miniocpp
             Crc32c::crc32c
     )
 

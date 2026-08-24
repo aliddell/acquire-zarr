@@ -4,7 +4,7 @@
 #include "chunk.hh"
 #include "definitions.hh"
 #include "file.sink.hh"
-#include "s3.connection.hh"
+#include "s3.client.hh"
 #include "shard.hh"
 #include "thread.pool.hh"
 
@@ -17,7 +17,7 @@ class Array : public ArrayBase
     Array(std::shared_ptr<ArrayConfig> config,
           std::shared_ptr<ThreadPool> thread_pool,
           std::shared_ptr<FileHandlePool> file_handle_pool,
-          std::shared_ptr<S3ConnectionPool> s3_connection_pool);
+          std::shared_ptr<S3Client> s3_client);
 
     size_t memory_usage() const noexcept override;
 

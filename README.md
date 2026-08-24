@@ -77,8 +77,10 @@ This library has the following dependencies:
 
 - [c-blosc](https://github.com/Blosc/c-blosc) v1.21.5
 - [nlohmann-json](https://github.com/nlohmann/json) v3.11.3
-- [minio-cpp](https://github.com/minio/minio-cpp) v0.3.0
+- [aws-crt-cpp](https://github.com/awslabs/aws-crt-cpp) v0.43.0
 - [crc32c](https://github.com/google/crc32c) v1.1.2
+- [zstd](https://github.com/facebook/zstd) v1.5.5
+- [yaml-cpp](https://github.com/jbeder/yaml-cpp) v0.8.0
 
 We use [vcpkg] to install them, as it integrates well with CMake.
 To install vcpkg, clone the repository and bootstrap it:
@@ -714,13 +716,13 @@ If you are using environment variables, set the following:
 - `AWS_SECRET_ACCESS_KEY`: Your AWS secret key
 - `AWS_SESSION_TOKEN`: Optional session token for temporary credentials
 
-These must be set in the environment where your application runs.
+These must be set in the environment where your application runs, before the
+stream is created.
 
-**Important Note:** You should ensure these environment variables are set *before* running your application or importing
-the library or Python module.
-They will not be available if set after the library is loaded.
-Configuration requires specifying the endpoint, bucket
-name, and region:
+Configuration requires specifying the endpoint and bucket name. The region is
+optional and defaults to `us-east-1`, which S3-compatible servers such as MinIO
+ignore; set it explicitly when writing to AWS. Requests use virtual-host
+addressing for `*.amazonaws.com` endpoints and path-style addressing otherwise:
 
 ```c
 // ensure your environment is set up for S3 access before running your program

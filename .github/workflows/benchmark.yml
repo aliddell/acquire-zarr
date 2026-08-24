@@ -42,7 +42,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
           ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Set up Python 3.13
@@ -66,7 +65,7 @@ jobs:
 
       - name: Install vcpkg
         run: |
-          git clone https://github.com/microsoft/vcpkg.git -b 2025.03.19 --depth 1
+          git clone https://github.com/microsoft/vcpkg.git -b 2026.07.29 --depth 1
           cd vcpkg && ./bootstrap-vcpkg.sh
           echo "VCPKG_ROOT=${{github.workspace}}/vcpkg" >> $GITHUB_ENV
           echo "${{github.workspace}}/vcpkg" >> $GITHUB_PATH

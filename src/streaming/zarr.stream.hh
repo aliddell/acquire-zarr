@@ -8,7 +8,7 @@
 #include "frame.queue.hh"
 #include "multiscale.array.hh"
 #include "plate.hh"
-#include "s3.connection.hh"
+#include "s3.client.hh"
 #include "sink.hh"
 #include "thread.pool.hh"
 
@@ -95,7 +95,7 @@ struct ZarrStream_s
     std::unique_ptr<zarr::FrameQueue> frame_queue_;
 
     std::shared_ptr<zarr::ThreadPool> thread_pool_;
-    std::shared_ptr<zarr::S3ConnectionPool> s3_connection_pool_;
+    std::shared_ptr<zarr::S3Client> s3_client_;
     std::shared_ptr<zarr::FileHandlePool> file_handle_pool_;
 
     bool is_s3_acquisition_() const;

@@ -17,7 +17,7 @@
 namespace zarr {
 
 class FileHandlePool;
-class S3ConnectionPool;
+class S3Client;
 
 struct ShardConfig
 {
@@ -32,7 +32,7 @@ class Shard
   public:
     Shard(const ShardConfig& config,
           std::shared_ptr<FileHandlePool> file_handle_pool,
-          std::shared_ptr<S3ConnectionPool> s3_connection_pool);
+          std::shared_ptr<S3Client> s3_client);
     ~Shard();
 
     [[nodiscard]] bool write_chunk(uint32_t internal_index,
@@ -67,7 +67,7 @@ class Shard
     uint64_t file_offset_;
 
     std::shared_ptr<FileHandlePool> file_handle_pool_;
-    std::shared_ptr<S3ConnectionPool> s3_connection_pool_;
+    std::shared_ptr<S3Client> s3_client_;
 
     std::string path_;
     std::optional<std::string> bucket_name_;

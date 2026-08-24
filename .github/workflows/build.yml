@@ -50,8 +50,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true
 
       - name: Set up sccache
         uses: mozilla-actions/sccache-action@v0.0.9
@@ -82,7 +80,7 @@ jobs:
 
       - name: Install vcpkg
         run: |
-          git clone https://github.com/microsoft/vcpkg.git -b 2025.03.19 --depth 1
+          git clone https://github.com/microsoft/vcpkg.git -b 2026.07.29 --depth 1
           cd vcpkg && ./bootstrap-vcpkg.sh
           echo "VCPKG_ROOT=${{github.workspace}}/vcpkg" >> $GITHUB_ENV
           echo "${{github.workspace}}/vcpkg" >> $GITHUB_PATH
@@ -163,8 +161,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -190,7 +186,7 @@ jobs:
       - name: Install vcpkg
         if: ${{ !startsWith(matrix.platform, 'ubuntu') }} # vcpkg will be installed in the manylinux image for Ubuntu builds
         run: |
-          git clone https://github.com/microsoft/vcpkg.git -b 2025.03.19 --depth 1
+          git clone https://github.com/microsoft/vcpkg.git -b 2026.07.29 --depth 1
           cd vcpkg && ./bootstrap-vcpkg.sh
           echo "VCPKG_ROOT=${{github.workspace}}/vcpkg" >> $GITHUB_ENV
           echo "${{github.workspace}}/vcpkg" >> $GITHUB_PATH
@@ -227,7 +223,7 @@ jobs:
           CIBW_BEFORE_BUILD: >-
             yum install -y ninja-build gcc-toolset-11-gcc gcc-toolset-11-gcc-c++ perl-IPC-Cmd &&
             source /opt/rh/gcc-toolset-11/enable &&
-            git clone https://github.com/microsoft/vcpkg.git -b 2025.03.19 --depth 1 &&
+            git clone https://github.com/microsoft/vcpkg.git -b 2026.07.29 --depth 1 &&
             cd vcpkg &&
             CMAKE_POLICY_VERSION_MINIMUM=3.5 ./bootstrap-vcpkg.sh &&
             ./vcpkg integrate install

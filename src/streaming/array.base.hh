@@ -3,7 +3,7 @@
 #include "array.dimensions.hh"
 #include "compression.params.hh"
 #include "file.handle.hh"
-#include "s3.connection.hh"
+#include "s3.client.hh"
 #include "sink.hh"
 #include "thread.pool.hh"
 #include "zarr.types.h"
@@ -71,7 +71,7 @@ class ArrayBase
     ArrayBase(std::shared_ptr<ArrayConfig> config,
               std::shared_ptr<ThreadPool> thread_pool,
               std::shared_ptr<FileHandlePool> file_handle_pool,
-              std::shared_ptr<S3ConnectionPool> s3_connection_pool);
+              std::shared_ptr<S3Client> s3_client);
     virtual ~ArrayBase() = default;
 
     /**
@@ -115,7 +115,7 @@ class ArrayBase
   protected:
     std::shared_ptr<ArrayConfig> config_;
     std::shared_ptr<ThreadPool> thread_pool_;
-    std::shared_ptr<S3ConnectionPool> s3_connection_pool_;
+    std::shared_ptr<S3Client> s3_client_;
     std::shared_ptr<FileHandlePool> file_handle_pool_;
 
     // JSON metadata
@@ -142,7 +142,7 @@ std::unique_ptr<ArrayBase>
 make_array(std::shared_ptr<ArrayConfig> config,
            std::shared_ptr<ThreadPool> thread_pool,
            std::shared_ptr<FileHandlePool> file_handle_pool,
-           std::shared_ptr<S3ConnectionPool> s3_connection_pool,
+           std::shared_ptr<S3Client> s3_client,
            bool is_hcs_array);
 
 [[nodiscard]] bool
