@@ -10,6 +10,11 @@ on:
 
 env:
   BUILD_TYPE: Release
+  # vcpkg 2026.07.29's portfiles use string(JSON ... STRING_ENCODE), which needs
+  # CMake >= 4. Both the pinned 3.31 (for the VS18 generator) and pip's
+  # "cmake<4.0.0" put an older cmake on PATH, so make vcpkg fetch its own
+  # (4.4.0) for building ports instead of borrowing ours.
+  VCPKG_FORCE_DOWNLOADED_BINARIES: 1
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
