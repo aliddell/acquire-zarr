@@ -31,7 +31,7 @@ class Array : public ArrayBase
     mutable std::vector<std::mutex> chunk_mutexes_;
 
     std::vector<std::shared_ptr<Shard>> shards_;
-    std::mutex shards_mutex_;
+    mutable std::mutex shards_mutex_;
 
     std::atomic<size_t> write_counter_;
     std::mutex write_counter_mutex_;

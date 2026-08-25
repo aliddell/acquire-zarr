@@ -3,6 +3,7 @@
 #include "sink.hh"
 #include "s3.client.hh"
 
+#include <atomic>
 #include <condition_variable>
 #include <map>
 #include <memory>
@@ -31,6 +32,17 @@ class S3Sink : public Sink
 
     bool write(size_t offset, ConstByteSpan data) override;
 
+    /**
+     * @brief Bytes staged for upload but not yet handed to it.
+     * @details Out-of-order writers can leave most of a shard sitting in
+     * pending_ while the fragment that unblocks them is still being written,
+     * so this is worth reporting rather than assuming it away. Bytes already
+     * handed to an in-flight append are not counted: that is one batch at
+     * most, and it is released whether the append returns or throws.
+     * @return The number of bytes staged.
+     */
+    size_t memory_usage() const noexcept override;
+
   protected:
     bool flush_() override;
 
@@ -55,9 +67,17 @@ class S3Sink : public Sink
     /// Bytes already handed to the upload.
     size_t nbytes_appended_{ 0 };
 
+    /// pending_ and staged_ sizes, readable without the lock.
+    std::atomic<size_t> staging_bytes_{ 0 };
+
     /// Whether a thread is currently appending. Only one may, so the others
-    /// stage their bytes and let the appending thread pick them up.
+    /// stage their bytes and let the appending thread pick them up. flush_
+    /// holds this for the whole of finalization.
     bool draining_{ false };
+
+    /// Whether finalization has begun. Writes after that point cannot reach
+    /// the object, so they are refused rather than silently staged.
+    bool closing_{ false };
 
     bool failed_{ false };
 

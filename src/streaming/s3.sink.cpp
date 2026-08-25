@@ -3,6 +3,58 @@
 
 #include <utility>
 
+namespace {
+/// Holds S3Sink's exclusive-append claim for the caller's scope. The claim is
+/// released even if an append throws, so a failed write cannot wedge the flush
+/// that waits on it; an unacknowledged claim marks the sink failed, since bytes
+/// counted as appended never reached the object.
+class AppendClaim
+{
+  public:
+    AppendClaim(std::unique_lock<std::mutex>& lock,
+                std::condition_variable& cv,
+                bool& draining,
+                bool& failed)
+      : lock_{ lock }
+      , cv_{ cv }
+      , draining_{ draining }
+      , failed_{ failed }
+    {
+        draining_ = true;
+    }
+
+    ~AppendClaim()
+    {
+        if (!lock_.owns_lock()) {
+            // an append threw; take the lock back to publish the failure
+            try {
+                lock_.lock();
+            } catch (...) {
+            }
+        }
+
+        if (!acknowledged_) {
+            failed_ = true;
+        }
+        draining_ = false;
+        cv_.notify_all();
+    }
+
+    AppendClaim(const AppendClaim&) = delete;
+    AppendClaim& operator=(const AppendClaim&) = delete;
+
+    /// Report that everything claimed was appended.
+    void acknowledge() { acknowledged_ = true; }
+
+  private:
+    std::unique_lock<std::mutex>& lock_;
+    std::condition_variable& cv_;
+    bool& draining_;
+    bool& failed_;
+    bool acknowledged_{ false };
+};
+} // namespace
+
 zarr::S3Sink::S3Sink(std::string_view bucket_name,
                      std::string_view object_key,
                      std::shared_ptr<S3Client> client)
@@ -13,6 +65,12 @@ zarr::S3Sink::S3Sink(std::string_view bucket_name,
     EXPECT(!bucket_name_.empty(), "Bucket name must not be empty");
     EXPECT(!object_key_.empty(), "Object key must not be empty");
     EXPECT(client_, "Null pointer: client");
+}
+
+size_t
+zarr::S3Sink::memory_usage() const noexcept
+{
+    return staging_bytes_.load();
 }
 
 void
@@ -34,7 +92,7 @@ zarr::S3Sink::drain_(std::unique_lock<std::mutex>& lock)
         return true;
     }
 
-    draining_ = true;
+    AppendClaim claim(lock, cv_, draining_, failed_);
     bool retval = true;
 
     while (retval && !staged_.empty() &&
@@ -55,17 +113,16 @@ zarr::S3Sink::drain_(std::unique_lock<std::mutex>& lock)
         auto batch = std::move(staged_);
         staged_.clear();
         nbytes_appended_ += batch.size();
+        staging_bytes_ -= batch.size();
 
         lock.unlock();
         retval = upload_->append(batch);
         lock.lock();
     }
 
-    draining_ = false;
-    if (!retval) {
-        failed_ = true;
+    if (retval) {
+        claim.acknowledge();
     }
-    cv_.notify_all();
 
     return retval;
 }
@@ -80,6 +137,15 @@ zarr::S3Sink::write(size_t offset, ConstByteSpan data)
     std::unique_lock lock(mutex_);
 
     if (failed_) {
+        return false;
+    }
+
+    if (closing_) {
+        LOG_ERROR("Cannot write data at offset ",
+                  offset,
+                  " of object ",
+                  object_key_,
+                  ", it is being finalized");
         return false;
     }
 
@@ -109,6 +175,7 @@ zarr::S3Sink::write(size_t offset, ConstByteSpan data)
         }
     } else {
         pending_.emplace(offset, ByteVector(data.begin(), data.end()));
+        staging_bytes_ += data.size();
     }
 
     coalesce_();
@@ -125,6 +192,8 @@ zarr::S3Sink::flush_()
     // underneath a writer that is still appending
     cv_.wait(lock, [this] { return !draining_; });
 
+    closing_ = true;
+
     if (failed_) {
         return false;
     }
@@ -140,8 +209,13 @@ zarr::S3Sink::flush_()
         return false;
     }
 
+    // hold the append slot for the rest of finalization: two appends in flight
+    // at once are undefined, and this class accepts concurrent writers
+    AppendClaim claim(lock, cv_, draining_, failed_);
+
     if (!upload_) {
         if (staged_.empty()) {
+            claim.acknowledge();
             return true;
         }
 
@@ -150,28 +224,43 @@ zarr::S3Sink::flush_()
         auto batch = std::move(staged_);
         staged_.clear();
         nbytes_appended_ += batch.size();
+        staging_bytes_ -= batch.size();
 
         lock.unlock();
-        return client_->put_object(bucket_name_, object_key_, batch);
+        const bool stored =
+          client_->put_object(bucket_name_, object_key_, batch);
+        lock.lock();
+
+        if (stored) {
+            claim.acknowledge();
+        }
+
+        return stored;
     }
 
     while (!staged_.empty()) {
         auto batch = std::move(staged_);
         staged_.clear();
         nbytes_appended_ += batch.size();
+        staging_bytes_ -= batch.size();
 
         lock.unlock();
         const bool appended = upload_->append(batch);
         lock.lock();
 
         if (!appended) {
-            failed_ = true;
             return false;
         }
     }
 
     auto* upload = upload_.get();
     lock.unlock();
+    const bool stored = upload->finish();
+    lock.lock();
 
-    return upload->finish();
+    if (stored) {
+        claim.acknowledge();
+    }
+
+    return stored;
 }

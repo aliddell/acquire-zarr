@@ -132,6 +132,17 @@ zarr::Shard::skip_chunk(uint32_t internal_index)
     return res;
 }
 
+size_t
+zarr::Shard::staged_bytes() const noexcept
+{
+    std::unique_lock lock(mutex_, std::try_to_lock);
+    if (!lock.owns_lock() || !sink_) {
+        return 0;
+    }
+
+    return sink_->memory_usage();
+}
+
 void
 zarr::Shard::make_sink_()
 {

@@ -53,6 +53,14 @@ class Shard
 
     const std::string& path() const { return path_; }
 
+    /**
+     * @brief Bytes the shard's sink is holding but has not yet stored.
+     * @details Best effort: reports 0 rather than waiting if the shard is busy,
+     * since this only feeds a usage estimate.
+     * @return The number of bytes buffered by the sink.
+     */
+    size_t staged_bytes() const noexcept;
+
   private:
     std::vector<uint64_t> offsets_;
     std::vector<uint64_t> extents_;
@@ -60,7 +68,7 @@ class Shard
     bool finalized_{ false };   // guarded by mutex_
     bool finalize_ok_{ false }; // guarded by mutex_; valid once finalized_
 
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::condition_variable cv_;
     std::atomic<uint64_t> unwritten_chunks_;
 

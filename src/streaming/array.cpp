@@ -147,6 +147,18 @@ zarr::Array::memory_usage() const noexcept
         }
     }
 
+    // An S3 shard stages fragments that arrived out of order, which can reach
+    // most of the shard. Skip the tally rather than wait for it: this is an
+    // estimate, and callers must not block on the write path.
+    std::unique_lock shards_lock(shards_mutex_, std::try_to_lock);
+    if (shards_lock.owns_lock()) {
+        for (const auto& shard : shards_) {
+            if (shard) {
+                total += shard->staged_bytes();
+            }
+        }
+    }
+
     return total;
 }
 

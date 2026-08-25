@@ -37,6 +37,21 @@ main()
         std::vector<uint8_t> expected(total);
         std::iota(expected.begin(), expected.end(), uint8_t{ 0 });
 
+        // a fragment that cannot be appended yet is reported as held, so
+        // Array::memory_usage() can see it
+        {
+            auto sink = std::make_unique<zarr::S3Sink>(
+              settings->bucket_name, object_name, client);
+
+            EXPECT_EQ(size_t, 0, sink->memory_usage());
+
+            // offset 0 has not arrived, so this one can only be staged
+            CHECK(sink->write(
+              fragment_size,
+              std::span(expected.data() + fragment_size, fragment_size)));
+            EXPECT_EQ(size_t, fragment_size, sink->memory_usage());
+        }
+
         {
             auto sink = std::make_unique<zarr::S3Sink>(
               settings->bucket_name, object_name, client);

@@ -23,6 +23,13 @@ class Sink
      */
     [[nodiscard]] virtual bool write(size_t offset, ConstByteSpan data) = 0;
 
+    /**
+     * @brief Bytes the sink is holding that are not yet in storage.
+     * @details Sinks that pass every write straight through report 0.
+     * @return The number of bytes buffered.
+     */
+    virtual size_t memory_usage() const noexcept { return 0; }
+
   protected:
     /**
      * @brief Flush any buffered data to the sink.
