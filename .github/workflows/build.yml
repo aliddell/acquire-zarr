@@ -9,7 +9,8 @@ env:
   # vcpkg 2026.07.29's portfiles use string(JSON ... STRING_ENCODE), which needs
   # CMake >= 4. Both the pinned 3.31 (for the VS18 generator) and pip's
   # "cmake<4.0.0" put an older cmake on PATH, so make vcpkg fetch its own
-  # (4.4.0) for building ports instead of borrowing ours.
+  # (4.4.0) for building ports instead of borrowing ours. cibuildwheel does not
+  # forward this into the manylinux container, so CIBW_ENVIRONMENT repeats it.
   VCPKG_FORCE_DOWNLOADED_BINARIES: 1
 
 jobs:
@@ -236,6 +237,7 @@ jobs:
             ./vcpkg integrate install
           CIBW_ENVIRONMENT: >-
             VCPKG_ROOT=/project/vcpkg
+            VCPKG_FORCE_DOWNLOADED_BINARIES=1
             PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
             CC=/opt/rh/gcc-toolset-11/root/usr/bin/gcc
             CXX=/opt/rh/gcc-toolset-11/root/usr/bin/g++
