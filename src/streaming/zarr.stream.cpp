@@ -43,6 +43,14 @@ validate_s3_settings(const ZarrS3Settings* settings, std::string& error)
         return false;
     }
 
+    std::string endpoint = zarr::trim(settings->endpoint);
+    if (!endpoint.starts_with("http://") &&
+        !endpoint.starts_with("https://")) {
+        error = "S3 endpoint '" + endpoint +
+                "' must begin with http:// or https://";
+        return false;
+    }
+
     std::string trimmed = zarr::trim(settings->bucket_name);
     if (trimmed.length() < 3 || trimmed.length() > 63) {
         error = "Invalid length for S3 bucket name: " +

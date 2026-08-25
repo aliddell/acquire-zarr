@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <functional>
 #include <future>
 #include <istream>
@@ -76,16 +77,21 @@ parse_endpoint(const std::string& endpoint)
 {
     Endpoint parsed;
 
+    // Neither default is safe to guess: TLS would fail the handshake against a
+    // plaintext server, and plaintext would silently downgrade one that
+    // expected TLS. Make the caller say which they meant.
     std::string_view rest(endpoint);
+    EXPECT(rest.starts_with("http://") || rest.starts_with("https://"),
+           "S3 endpoint '",
+           endpoint,
+           "' must begin with http:// or https://.");
+
     if (rest.starts_with("https://")) {
         parsed.scheme = "https";
         rest.remove_prefix(8);
-    } else if (rest.starts_with("http://")) {
+    } else {
         parsed.scheme = "http";
         rest.remove_prefix(7);
-    } else {
-        // a bare host is assumed to want TLS, as it did before
-        parsed.scheme = "https";
     }
 
     // drop any path, query or fragment the caller appended
@@ -109,19 +115,12 @@ parse_endpoint(const std::string& endpoint)
     return parsed;
 }
 
-/// The endpoint URI and request path for one object, per the addressing style.
-struct RequestTarget
-{
-    std::string uri;
-    std::string path;
-};
-
-RequestTarget
+zarr::S3RequestTarget
 make_target(const Endpoint& endpoint,
             std::string_view bucket_name,
             std::string_view object_name)
 {
-    RequestTarget target;
+    zarr::S3RequestTarget target;
 
     if (endpoint.virtual_host) {
         target.uri = endpoint.scheme + "://" + std::string(bucket_name) + "." +
@@ -198,7 +197,7 @@ capture_outcome(crt_s3::S3MetaRequestOptions& options,
 }
 
 std::shared_ptr<crt::Http::HttpRequest>
-make_request(std::string_view method, const RequestTarget& target)
+make_request(std::string_view method, const zarr::S3RequestTarget& target)
 {
     auto request = crt::MakeShared<crt::Http::HttpRequest>(crt::ApiAllocator());
     EXPECT(request, "Failed to allocate an HTTP request.");
@@ -269,6 +268,14 @@ struct MemoryStream : std::istream
 };
 
 } // namespace
+
+zarr::S3RequestTarget
+zarr::s3_request_target(const std::string& endpoint,
+                        std::string_view bucket_name,
+                        std::string_view object_name)
+{
+    return make_target(parse_endpoint(endpoint), bucket_name, object_name);
+}
 
 struct zarr::S3Client::Impl
 {
@@ -495,10 +502,17 @@ zarr::S3Client::object_size(std::string_view bucket_name,
                                  return std::tolower(
                                           static_cast<unsigned char>(a)) == b;
                              })) {
-                  const std::string value(
-                    reinterpret_cast<const char*>(header.value.ptr),
-                    header.value.len);
-                  *size = static_cast<size_t>(std::stoull(value));
+                  // this runs on a CRT thread, called from C: from_chars
+                  // reports a malformed value instead of throwing through the
+                  // C frames the way stoull would. An unparseable length is
+                  // left unset, as an absent one is.
+                  const auto* value =
+                    reinterpret_cast<const char*>(header.value.ptr);
+                  size_t length = 0;
+                  if (std::from_chars(value, value + header.value.len, length)
+                        .ec == std::errc{}) {
+                      *size = length;
+                  }
                   break;
               }
           }

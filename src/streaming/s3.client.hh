@@ -16,6 +16,33 @@ struct S3Settings
 };
 
 /**
+ * @brief Where an object's requests are sent.
+ */
+struct S3RequestTarget
+{
+    std::string uri;  ///< Scheme and authority, without a trailing slash.
+    std::string path; ///< Request path, with a leading slash.
+};
+
+/**
+ * @brief Resolve the request target for one object.
+ * @details Virtual-host addressing is used for `*.amazonaws.com` endpoints,
+ * which require it, and path style otherwise, which MinIO and most other
+ * S3-compatible servers require. S3Client calls this for every request; it is
+ * declared here so the addressing rules can be tested without a server.
+ * @param endpoint Endpoint URL, which must begin with http:// or https://. Any
+ * path, query or fragment is discarded.
+ * @param bucket_name The name of the bucket.
+ * @param object_name The key within the bucket. Empty addresses the bucket
+ * itself.
+ * @returns The endpoint URI and request path to use.
+ * @throws std::runtime_error if the endpoint has no scheme or no host.
+ */
+S3RequestTarget s3_request_target(const std::string& endpoint,
+                                  std::string_view bucket_name,
+                                  std::string_view object_name);
+
+/**
  * @brief A single append-only upload of one S3 object.
  * @details Wraps one CRT PutObject meta request in async-write mode: the CRT
  * splits the byte stream into parts, uploads them in parallel, retries failed
@@ -78,10 +105,11 @@ class S3Client
   public:
     /**
      * @brief Construct a client for the endpoint in @p settings.
-     * @param settings Endpoint, bucket and optional region. An absent region is
-     * signed as "us-east-1", which S3-compatible servers ignore.
-     * @throws std::runtime_error if the endpoint has no host, or if the
-     * underlying CRT client cannot be created.
+     * @param settings Endpoint, bucket and optional region. The endpoint must
+     * begin with http:// or https://. An absent region is signed as
+     * "us-east-1", which S3-compatible servers ignore.
+     * @throws std::runtime_error if the endpoint has no scheme or no host, or
+     * if the underlying CRT client cannot be created.
      */
     explicit S3Client(const S3Settings& settings);
     ~S3Client();

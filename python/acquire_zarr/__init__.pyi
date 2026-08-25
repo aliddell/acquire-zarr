@@ -394,7 +394,14 @@ class Plate:
     def __repr__(self) -> str: ...
 
 class S3Settings:
-    """Settings for connecting to and storing data in S3."""
+    """Settings for connecting to and storing data in S3.
+
+    Attributes:
+        bucket_name: Name of the destination bucket.
+        endpoint: Endpoint URL, which must begin with "http://" or "https://".
+        region: Optional region. Defaults to "us-east-1", which S3-compatible
+            servers such as MinIO ignore.
+    """
 
     bucket_name: str
     endpoint: str

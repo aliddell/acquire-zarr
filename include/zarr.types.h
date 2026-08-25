@@ -111,6 +111,7 @@ extern "C"
      */
     typedef struct
     {
+        /** Endpoint URL, which must begin with http:// or https://. */
         const char* endpoint;
         const char* bucket_name;
         const char* region;

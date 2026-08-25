@@ -719,9 +719,10 @@ If you are using environment variables, set the following:
 These must be set in the environment where your application runs, before the
 stream is created.
 
-Configuration requires specifying the endpoint and bucket name. The region is
-optional and defaults to `us-east-1`, which S3-compatible servers such as MinIO
-ignore; set it explicitly when writing to AWS. Requests use virtual-host
+Configuration requires specifying the endpoint and bucket name. The endpoint
+must begin with `http://` or `https://`; there is no default scheme. The region
+is optional and defaults to `us-east-1`, which S3-compatible servers such as
+MinIO ignore; set it explicitly when writing to AWS. Requests use virtual-host
 addressing for `*.amazonaws.com` endpoints and path-style addressing otherwise:
 
 ```c
@@ -751,7 +752,7 @@ settings = aqz.StreamSettings()
 
 # Configure S3 storage
 s3_settings = aqz.S3Settings(
-    endpoint="s3.amazonaws.com",
+    endpoint="https://s3.amazonaws.com",
     bucket_name="my-zarr-data",
     region="us-east-1"
 )

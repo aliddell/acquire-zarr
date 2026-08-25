@@ -14,6 +14,7 @@ set(tests
         thread-pool-push-to-job-queue
         resolve-max-threads
         construct-data-paths
+        endpoint-request-target
         s3-client-bucket-exists
         s3-client-object-exists-check-false-positives
         s3-client-put-object
