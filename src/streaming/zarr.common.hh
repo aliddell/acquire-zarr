@@ -126,4 +126,12 @@ regularize_key(std::string_view key);
  */
 uint32_t
 resolve_max_threads(uint32_t requested_max_threads);
+
+/**
+ * @brief Whether ZARR_DIRECT_IO asks writes to bypass the OS page cache.
+ * Honored on Linux only; ignored on Windows and macOS.
+ * @return true for "1", "true", "on", "yes" (case-insensitive), else false.
+ */
+bool
+resolve_direct_io();
 } // namespace zarr
