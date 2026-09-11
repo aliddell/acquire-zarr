@@ -330,7 +330,8 @@ make_array_config(const ZarrArraySettings* settings,
                   const std::string& parent_path,
                   std::optional<std::string> array_key,
                   const std::optional<std::string>& bucket_name,
-                  std::string& error)
+                  std::string& error,
+                  bool force_ngff)
 {
     // remove leading/trailing slashes and whitespace
     std::string key = zarr::regularize_key(settings->output_key);
@@ -352,19 +353,41 @@ make_array_config(const ZarrArraySettings* settings,
       make_array_dimensions(settings);
 
     std::optional<ZarrDownsamplingMethod> downsampling_method = std::nullopt;
-    if (settings->multiscale) {
+    if (settings->downsampling_method > ZarrDownsamplingMethod_None) {
         downsampling_method = settings->downsampling_method;
     }
 
-    return std::make_shared<zarr::ArrayConfig>(store_root,
-                                               key,
-                                               bucket_name,
-                                               compression_params,
-                                               dimensions,
-                                               settings->data_type,
-                                               downsampling_method,
-                                               0,
-                                               settings->max_levels);
+    return std::make_shared<zarr::ArrayConfig>(
+      store_root,
+      key,
+      bucket_name,
+      compression_params,
+      dimensions,
+      settings->data_type,
+      downsampling_method,
+      0,
+      downsampling_method.has_value() || settings->is_ngff || force_ngff,
+      settings->max_levels);
+}
+
+std::unique_ptr<zarr::ArrayBase>
+make_array(std::shared_ptr<zarr::ArrayConfig> config,
+           std::shared_ptr<zarr::ThreadPool> thread_pool,
+           std::shared_ptr<zarr::FileHandlePool> file_handle_pool,
+           std::shared_ptr<zarr::S3ConnectionPool> s3_connection_pool)
+{
+    const auto ngff = config->downsampling_method || config->is_ngff;
+
+    std::unique_ptr<zarr::ArrayBase> array;
+    if (ngff) {
+        array = std::make_unique<zarr::MultiscaleArray>(
+          config, thread_pool, file_handle_pool, s3_connection_pool);
+    } else {
+        array = std::make_unique<zarr::Array>(
+          config, thread_pool, file_handle_pool, s3_connection_pool);
+    }
+
+    return array;
 }
 
 [[nodiscard]] bool
@@ -461,9 +484,7 @@ validate_array_settings(const ZarrArraySettings* settings,
         }
     }
 
-    // we don't care about downsampling method if not multiscale
-    if (settings->multiscale &&
-        settings->downsampling_method >= ZarrDownsamplingMethodCount) {
+    if (settings->downsampling_method >= ZarrDownsamplingMethodCount) {
         error = "Invalid downsampling method: " +
                 std::to_string(settings->downsampling_method);
         return false;
@@ -716,7 +737,7 @@ check_array_structure(std::vector<std::shared_ptr<zarr::ArrayConfig>> arrays,
     // check that if the root node is not multiscale, there are no other arrays
     for (auto i = 0; i < arrays.size(); ++i) {
         const auto& array = arrays[i];
-        const bool is_multiscale_array = array->downsampling_method.has_value();
+        const bool is_multiscale_array = array->is_ngff;
 
         const std::string& key = array->node_key;
 
@@ -761,6 +782,11 @@ check_array_structure(std::vector<std::shared_ptr<zarr::ArrayConfig>> arrays,
                 std::string segment = segments.top();
                 segments.pop();
 
+                const bool is_last_segment = segments.empty();
+                const auto array_node_type =
+                  is_multiscale_array ? DatasetNodeType::MultiscaleArray
+                                      : DatasetNodeType::Array;
+
                 // check if this segment already exists
                 if (auto it = current_node->children.find(segment);
                     it == current_node->children.end()) {
@@ -769,14 +795,14 @@ check_array_structure(std::vector<std::shared_ptr<zarr::ArrayConfig>> arrays,
                     new_node->name = segment;
                     new_node->parent = current_node;
 
-                    if (segments.empty()) { // Last segment
-                        new_node->type = is_multiscale_array
-                                           ? DatasetNodeType::MultiscaleArray
-                                           : DatasetNodeType::Array;
-                    } else {
-                        new_node->type = DatasetNodeType::Directory;
-                    }
+                    new_node->type = is_last_segment
+                                       ? array_node_type
+                                       : DatasetNodeType::Directory;
                     current_node->children.emplace(segment, new_node);
+                } else if (is_last_segment) {
+                    // a longer key processed earlier created this node as a
+                    // placeholder directory, but it is really an array
+                    it->second->type = array_node_type;
                 }
 
                 // Move to the child node
@@ -810,8 +836,8 @@ check_array_structure(std::vector<std::shared_ptr<zarr::ArrayConfig>> arrays,
 
         // if the parent is not multiscale, it must not have any children
         if (!can_have_children && !current_node->children.empty()) {
-            error = "Directory node '" + current_node->name +
-                    "' cannot have children";
+            error =
+              "Array node '" + current_node->name + "' cannot have children";
             return false;
         }
 
@@ -873,7 +899,7 @@ dimension_type_to_string(ZarrDimensionType type)
 
 /* ZarrStream_s implementation */
 
-ZarrStream::ZarrStream_s(struct ZarrStreamSettings_s* settings)
+ZarrStream::ZarrStream_s(const ZarrStreamSettings_s* settings)
 {
     EXPECT(validate_settings_(settings), error_);
 
@@ -1129,7 +1155,8 @@ ZarrStream_s::validate_settings_(const ZarrStreamSettings* settings)
                                         "",
                                         std::nullopt,
                                         std::nullopt,
-                                        error_);
+                                        error_,
+                                        false);
         if (!config) {
             return false;
         }
@@ -1210,7 +1237,8 @@ ZarrStream_s::validate_settings_(const ZarrStreamSettings* settings)
                                                     parent_path,
                                                     field.path,
                                                     std::nullopt,
-                                                    error_);
+                                                    error_,
+                                                    true);
                     if (config == nullptr) {
                         return false;
                     }
@@ -1231,15 +1259,20 @@ ZarrStream_s::validate_settings_(const ZarrStreamSettings* settings)
 bool
 ZarrStream_s::configure_array_(const ZarrArraySettings* settings,
                                const std::string& parent_path,
-                               bool is_hcs_array)
+                               bool force_ngff)
 {
     std::optional<std::string> bucket_name;
     if (s3_settings_) {
         bucket_name = s3_settings_->bucket_name;
     }
 
-    auto config = make_array_config(
-      settings, store_path_, parent_path, std::nullopt, bucket_name, error_);
+    const auto config = make_array_config(settings,
+                                          store_path_,
+                                          parent_path,
+                                          std::nullopt,
+                                          bucket_name,
+                                          error_,
+                                          force_ngff);
     if (config == nullptr) {
         return false;
     }
@@ -1258,11 +1291,8 @@ ZarrStream_s::configure_array_(const ZarrArraySettings* settings,
                                                 0,
                                                 0);
     try {
-        output->array = zarr::make_array(config,
-                                         thread_pool_,
-                                         file_handle_pool_,
-                                         s3_connection_pool_,
-                                         is_hcs_array);
+        output->array = make_array(
+          config, thread_pool_, file_handle_pool_, s3_connection_pool_);
     } catch (const std::exception& exc) {
         set_error_(exc.what());
     }
@@ -1357,12 +1387,13 @@ ZarrStream_s::commit_hcs_settings_(const ZarrHCSSettings* hcs_settings)
                 }
                 image_out.path = zarr::regularize_key(image_in.path);
 
-                if (image_in.array_settings) {
-                    image_in.array_settings->output_key = image_in.path;
-                }
+                // the array's key is fully specified by the FOV path, so
+                // supply it on a copy rather than writing back through the
+                // caller's settings (validation guarantees non-null here)
+                ZarrArraySettings fov_array = *image_in.array_settings;
+                fov_array.output_key = image_in.path;
 
-                if (!configure_array_(
-                      image_in.array_settings, well_key, true)) {
+                if (!configure_array_(&fov_array, well_key, true)) {
                     set_error_("Failed to configure array for field of view " +
                                std::to_string(k) + " in well " +
                                std::to_string(j) + " in plate " +

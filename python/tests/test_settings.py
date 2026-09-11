@@ -9,14 +9,13 @@ import numpy as np
 
 CONFIGS = {
     "yaml": """
-version: 1
+version: 2
 store_path: from-config.zarr
 overwrite: true
 max_threads: 4
 arrays:
   - output_key: channel0
     data_type: uint16
-    multiscale: true
     downsampling_method: mean
     compression:
       compressor: blosc1
@@ -31,7 +30,7 @@ arrays:
 """,
     "json": """
 {
-  "version": 1,
+  "version": 2,
   "store_path": "from-config.zarr",
   "overwrite": true,
   "max_threads": 4,
@@ -39,7 +38,6 @@ arrays:
     {
       "output_key": "channel0",
       "data_type": "uint16",
-      "multiscale": true,
       "downsampling_method": "mean",
       "compression": {"compressor": "blosc1", "codec": "blosc-zstd", "level": 1, "shuffle": 1},
       "dimensions": [
@@ -373,6 +371,60 @@ def test_estimate_max_memory_usage():
     assert max_memory == expected_memory
 
 
+def test_is_ngff_coercion():
+    settings = aqz.ArraySettings()
+    assert settings.downsampling_method is None
+    assert settings.is_ngff is False
+
+    # set to true in the absence of downsampling_method
+    settings.is_ngff = True
+    assert settings.is_ngff is True
+
+    # set to false and add a downsampling_method
+    settings.is_ngff = False
+    assert settings.is_ngff is False
+    settings.downsampling_method = aqz.DownsamplingMethod.MEAN
+    assert settings.is_ngff is True
+
+    # try to set false with a configured downsampling method
+    settings.is_ngff = False
+    assert settings.is_ngff is True
+    assert settings.downsampling_method is not None
+
+
+def test_is_ngff_coercion_is_not_sticky():
+    # clearing downsampling_method must restore the requested is_ngff, not
+    # leave it stuck at the coerced True
+    settings = aqz.ArraySettings()
+    assert settings.is_ngff is False
+
+    settings.downsampling_method = aqz.DownsamplingMethod.MEAN
+    assert settings.is_ngff is True
+
+    settings.downsampling_method = None
+    assert settings.downsampling_method is None
+    assert settings.is_ngff is False
+
+    # an explicitly requested True survives the round trip
+    settings.is_ngff = True
+    settings.downsampling_method = aqz.DownsamplingMethod.MEAN
+    settings.downsampling_method = None
+    assert settings.is_ngff is True
+
+
+def test_array_settings_repr_includes_is_ngff():
+    # is_ngff selects between a plain array node and an OME-NGFF group, so
+    # two settings that write different hierarchies must not repr identically
+    plain = aqz.ArraySettings(output_key="ch0", data_type=aqz.DataType.UINT16)
+    ngff = aqz.ArraySettings(
+        output_key="ch0", data_type=aqz.DataType.UINT16, is_ngff=True
+    )
+
+    assert "is_ngff=False" in repr(plain)
+    assert "is_ngff=True" in repr(ngff)
+    assert repr(plain) != repr(ngff)
+
+
 def _assert_expected(s):
     assert s.store_path == "from-config.zarr"
     assert s.overwrite is True
@@ -382,6 +434,7 @@ def _assert_expected(s):
     assert a.output_key == "channel0"
     assert a.data_type == aqz.DataType.UINT16
     assert a.downsampling_method == aqz.DownsamplingMethod.MEAN
+    assert a.is_ngff is True
     assert a.compression is not None
     assert a.compression.compressor == aqz.Compressor.BLOSC1
     assert a.compression.codec == aqz.CompressionCodec.BLOSC_ZSTD
@@ -414,10 +467,103 @@ def test_config_round_trip(tmp_path):
         _assert_expected(aqz.StreamSettings.from_file(str(path)))
 
 
+def test_load_settings_rejects_multiscale():
+    # `multiscale` was replaced by `is_ngff` in schema version 2; a version 2
+    # config carrying it must not be silently reinterpreted
+    with pytest.raises(ValueError):
+        aqz.StreamSettings.from_string(
+            CONFIGS["yaml"].replace(
+                "downsampling_method: mean", "multiscale: true"
+            )
+        )
+
+
+def test_load_settings_migrates_v1_multiscale():
+    # version 1 gated downsampling behind `multiscale`, so a version 1 config
+    # must keep loading with version 1 semantics
+    v1 = CONFIGS["yaml"].replace("version: 2", "version: 1")
+
+    s = aqz.StreamSettings.from_string(
+        v1.replace(
+            "downsampling_method: mean",
+            "multiscale: true\n    downsampling_method: mean",
+        )
+    )
+    assert s.arrays[0].is_ngff is True
+    assert s.arrays[0].downsampling_method == aqz.DownsamplingMethod.MEAN
+
+    # `multiscale` without a method: version 1's zero value was DECIMATE
+    s = aqz.StreamSettings.from_string(
+        v1.replace("downsampling_method: mean", "multiscale: true")
+    )
+    assert s.arrays[0].is_ngff is True
+    assert s.arrays[0].downsampling_method == aqz.DownsamplingMethod.DECIMATE
+
+    # version 1 ignored `downsampling_method` unless `multiscale` was true, so
+    # this is a plain array, not the OME-NGFF group version 2 would produce
+    s = aqz.StreamSettings.from_string(v1)
+    assert s.arrays[0].is_ngff is False
+    assert s.arrays[0].downsampling_method is None
+
+    # dumping always writes the current schema version
+    assert s.to_dict()["version"] == 2
+
+
+def test_load_settings_migrates_v1_hcs_arrays():
+    # the migration must also reach field-of-view arrays nested under plates
+    hcs_v1 = """
+version: 1
+store_path: plate.zarr
+plates:
+  - path: test_plate
+    name: Test Plate
+    row_names: [A]
+    column_names: ["1"]
+    wells:
+      - row_name: A
+        column_name: "1"
+        images:
+          - path: fov1
+            array:
+              data_type: uint16
+              multiscale: true
+              downsampling_method: mean
+              dimensions:
+                - {name: z, type: space, array_size_px: 0,  chunk_size_px: 1,  shard_size_chunks: 1}
+                - {name: y, type: space, array_size_px: 64, chunk_size_px: 64, shard_size_chunks: 1}
+                - {name: x, type: space, array_size_px: 64, chunk_size_px: 64, shard_size_chunks: 1}
+"""
+
+    s = aqz.StreamSettings.from_string(hcs_v1)
+    fov = s.hcs_plates[0].wells[0].images[0]
+    assert fov.array_settings.is_ngff is True
+    assert (
+        fov.array_settings.downsampling_method == aqz.DownsamplingMethod.MEAN
+    )
+
+
+def test_load_settings_rejects_is_ngff_in_v1():
+    # migration overwrites `is_ngff`, so a version 1 config that sets it is an
+    # error rather than a silently discarded value
+    with pytest.raises(ValueError):
+        aqz.StreamSettings.from_string(
+            CONFIGS["yaml"]
+            .replace("version: 2", "version: 1")
+            .replace("downsampling_method: mean", "is_ngff: true")
+        )
+
+
+def test_load_settings_rejects_unsupported_version():
+    with pytest.raises(ValueError):
+        aqz.StreamSettings.from_string(
+            CONFIGS["yaml"].replace("version: 2", "version: 3")
+        )
+
+
 def test_load_settings_rejects_malformed():
     with pytest.raises(ValueError):
         aqz.StreamSettings.from_string(
-            "version: 1\nstore_path: x\n"
+            "version: 2\nstore_path: x\n"
         )  # no arrays
     with pytest.raises(ValueError):
         aqz.StreamSettings.from_string(
@@ -438,7 +584,7 @@ def test_config_dict_round_trip():
 
 def test_yaml_dump_quotes_ambiguous_strings():
     hcs_yaml = """
-version: 1
+version: 2
 store_path: plate.zarr
 plates:
   - path: test_plate

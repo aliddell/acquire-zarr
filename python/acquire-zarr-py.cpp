@@ -34,10 +34,13 @@ struct ArrayLifetimeProps
     std::vector<uint32_t> shard_sizes;
     std::vector<size_t> storage_dimension_order;
 
-    ZarrCompressionSettings compression;
+    ZarrDataType data_type{};
+
+    ZarrCompressionSettings compression{};
     bool has_compression{ false };
-    ZarrDataType data_type;
+
     std::optional<ZarrDownsamplingMethod> downsampling_method;
+    bool is_ngff{ false };
     uint32_t max_levels{ 0 };
 
     ZarrArraySettings* array_settings()
@@ -77,9 +80,9 @@ struct ArrayLifetimeProps
         }
 
         array_settings_.data_type = data_type;
-        array_settings_.multiscale = downsampling_method.has_value();
         array_settings_.downsampling_method =
-          downsampling_method.value_or(ZarrDownsamplingMethod_Mean);
+          downsampling_method.value_or(ZarrDownsamplingMethod_None);
+        array_settings_.is_ngff = is_ngff;
         array_settings_.max_levels = max_levels;
 
         if (!storage_dimension_order.empty()) {
@@ -156,11 +159,11 @@ struct WellLifetimeProps
 
 struct AcquisitionLifetimeProps
 {
-    uint32_t id;
+    uint32_t id{};
     std::string name;
-    bool has_name;
+    bool has_name{ false };
     std::string description;
-    bool has_description;
+    bool has_description{ false };
     std::optional<uint64_t> start_time;
     std::optional<uint64_t> end_time;
 
@@ -554,6 +557,15 @@ class PyZarrArraySettings
         compression_settings_ = settings;
     }
 
+    // a value for downsampling_method coerces is_ngff to True, but only for
+    // as long as it is set: clearing it restores the requested value
+    bool is_ngff() const
+    {
+        return is_ngff_ || downsampling_method_.has_value();
+    }
+
+    void set_is_ngff(bool is_ngff) { is_ngff_ = is_ngff; }
+
     const std::vector<PyZarrDimensionProperties>& dimensions() const
     {
         return dims_;
@@ -636,6 +648,7 @@ class PyZarrArraySettings
         lt_props.output_key = output_key_;
         lt_props.data_type = data_type_;
         lt_props.downsampling_method = downsampling_method_;
+        lt_props.is_ngff = is_ngff();
         lt_props.max_levels = max_levels_;
 
         // compression settings
@@ -701,9 +714,12 @@ class PyZarrArraySettings
     std::string output_key_;
     std::optional<PyZarrCompressionSettings> compression_settings_;
     std::vector<PyZarrDimensionProperties> dims_;
+
     ZarrDataType data_type_{ ZarrDataType_uint8 };
+    bool is_ngff_{ false };
     std::optional<ZarrDownsamplingMethod> downsampling_method_{ std::nullopt };
     uint32_t max_levels_{ 0 };
+
     std::vector<std::string> storage_dimension_order_;
 };
 
@@ -844,7 +860,7 @@ class PyZarrAcquisition
     }
 
   private:
-    uint32_t id_;
+    uint32_t id_{};
     std::optional<std::string> name_;
     std::optional<std::string> description_;
     std::optional<uint64_t> start_time_;
@@ -1097,16 +1113,16 @@ class PyZarrStreamSettings
     std::vector<PyZarrArraySettings> arrays_;
     std::vector<PyZarrPlate> plates_;
 
-    mutable ZarrS3Settings s3_settings_;
+    mutable ZarrS3Settings s3_settings_{};
 
     mutable std::vector<ArrayLifetimeProps> array_lifetimes_;
     mutable std::vector<PlateLifetimeProps> plate_lifetimes_;
 
     mutable std::vector<ZarrArraySettings> array_settings_;
     mutable std::vector<ZarrHCSPlate> plate_settings_;
-    mutable ZarrHCSSettings hcs_settings_;
+    mutable ZarrHCSSettings hcs_settings_{};
 
-    mutable ZarrStreamSettings settings_;
+    mutable ZarrStreamSettings settings_{};
 };
 
 // ---------------------------------------------------------------------------
@@ -1138,11 +1154,11 @@ read_array(const ZarrArraySettings& a)
         arr.set_output_key(a.output_key);
     }
     arr.set_data_type(a.data_type);
-    // multiscale is implicit in Python: it is on iff a downsampling method is set
-    if (a.multiscale) {
+    if (a.downsampling_method > ZarrDownsamplingMethod_None) {
         arr.set_downsampling_method(a.downsampling_method);
         arr.set_max_levels(a.max_levels);
     }
+    arr.set_is_ngff(a.is_ngff);
     if (a.compression_settings) {
         PyZarrCompressionSettings c;
         c.set_compressor(a.compression_settings->compressor);
@@ -1825,7 +1841,8 @@ PYBIND11_MODULE(acquire_zarr, m)
                     std::optional<py::object> data_type,
                     std::optional<ZarrDownsamplingMethod> downsampling_method,
                     uint32_t max_levels,
-                    std::optional<py::list> storage_dimension_order) {
+                    std::optional<py::list> storage_dimension_order,
+                    std::optional<bool> is_ngff) {
             PyZarrArraySettings settings;
 
             if (output_key) {
@@ -1864,6 +1881,9 @@ PYBIND11_MODULE(acquire_zarr, m)
                 settings.set_downsampling_method(*downsampling_method);
             }
             settings.set_max_levels(max_levels);
+            if (is_ngff) {
+                settings.set_is_ngff(*is_ngff);
+            }
             if (storage_dimension_order) {
                 auto& order_list = *storage_dimension_order;
                 std::vector<std::string> order_vec(order_list.size());
@@ -1882,7 +1902,8 @@ PYBIND11_MODULE(acquire_zarr, m)
         py::arg("data_type") = std::nullopt,
         py::arg("downsampling_method") = std::nullopt,
         py::arg("max_levels") = 0,
-        py::arg("storage_dimension_order") = std::nullopt)
+        py::arg("storage_dimension_order") = std::nullopt,
+        py::arg("is_ngff") = std::nullopt)
       .def("__repr__",
            [](const PyZarrArraySettings& self) {
                std::string repr =
@@ -1914,11 +1935,15 @@ PYBIND11_MODULE(acquire_zarr, m)
                        case ZarrDownsamplingMethod_Max:
                            method_str = "DownsamplingMethod.MAX";
                            break;
+                       case ZarrDownsamplingMethod_None:
                        default:
                            method_str = "None";
                    }
                    repr += ", downsampling_method=" + method_str;
                }
+
+               repr += std::string(", is_ngff=") +
+                       (self.is_ngff() ? "True" : "False");
 
                repr += ")";
                return repr;
@@ -2001,7 +2026,10 @@ PYBIND11_MODULE(acquire_zarr, m)
                     &PyZarrArraySettings::set_max_levels)
       .def_property("storage_dimension_order",
                     &PyZarrArraySettings::storage_dimension_order,
-                    &PyZarrArraySettings::set_storage_dimension_order);
+                    &PyZarrArraySettings::set_storage_dimension_order)
+      .def_property("is_ngff",
+                    &PyZarrArraySettings::is_ngff,
+                    &PyZarrArraySettings::set_is_ngff);
 
     py::class_<PyZarrFieldOfView>(m, "FieldOfView", py::dynamic_attr())
       .def(py::init([](std::optional<std::string> path,
