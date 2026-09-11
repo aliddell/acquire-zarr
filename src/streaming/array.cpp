@@ -138,18 +138,23 @@ zarr::Array::Array(std::shared_ptr<ArrayConfig> config,
 size_t
 zarr::Array::memory_usage() const noexcept
 {
-    // size_bytes() returns the const allocation budget of each chunk and is
-    // safe to read without locking.
+    // Every lock here is a try_lock: this runs on a caller's thread, concurrent
+    // with the frame thread, and it feeds an estimate that must never block a
+    // write. A slot that is busy is skipped rather than waited for.
     size_t total = 0;
-    for (const auto& chunk : chunks_) {
-        if (chunk) { // slots are empty until lazily allocated on write
-            total += chunk->size_bytes();
+
+    // size_bytes() is a const allocation budget, but the slot holding the chunk
+    // is not: dispatch_chunk_job_ moves it out under the same mutex, and the
+    // Chunk can be destroyed the moment it does.
+    for (size_t i = 0; i < chunks_.size(); ++i) {
+        std::unique_lock chunk_lock(chunk_mutexes_[i], std::try_to_lock);
+        if (chunk_lock.owns_lock() && chunks_[i]) {
+            total += chunks_[i]->size_bytes();
         }
     }
 
     // An S3 shard stages fragments that arrived out of order, which can reach
-    // most of the shard. Skip the tally rather than wait for it: this is an
-    // estimate, and callers must not block on the write path.
+    // most of the shard.
     std::unique_lock shards_lock(shards_mutex_, std::try_to_lock);
     if (shards_lock.owns_lock()) {
         for (const auto& shard : shards_) {
@@ -638,8 +643,9 @@ zarr::Array::dispatch_skip_job_(std::shared_ptr<Shard> shard,
                                 uint32_t internal_idx,
                                 uint32_t shard_idx)
 {
+    // no notify: the only waiter's predicate is write_counter_ == 0, which an
+    // increment can never satisfy
     write_counter_.fetch_add(1);
-    write_counter_cv_.notify_all();
 
     auto job = [this, shard, internal_idx, shard_idx](
                  std::string& err) -> ThreadPool::TaskResult {
@@ -658,8 +664,7 @@ zarr::Array::dispatch_skip_job_(std::shared_ptr<Shard> shard,
             result = ThreadPool::TaskResult::Fatal;
         }
 
-        write_counter_.fetch_sub(1);
-        write_counter_cv_.notify_all();
+        finish_write_();
         return result;
     };
 
@@ -689,8 +694,9 @@ zarr::Array::dispatch_chunk_job_(std::shared_ptr<Shard> shard,
         chunk = std::move(chunks_[chunk_idx - chunk_offset]);
     }
 
+    // no notify: the only waiter's predicate is write_counter_ == 0, which an
+    // increment can never satisfy
     write_counter_.fetch_add(1);
-    write_counter_cv_.notify_all();
 
     auto job = [this,
                 shard,
@@ -752,8 +758,7 @@ zarr::Array::dispatch_chunk_job_(std::shared_ptr<Shard> shard,
             result = ThreadPool::TaskResult::Fatal;
         }
 
-        write_counter_.fetch_sub(1);
-        write_counter_cv_.notify_all();
+        finish_write_();
         return result;
     };
 
@@ -978,8 +983,34 @@ zarr::Array::finalize_shards_()
 void
 zarr::Array::close_sinks_()
 {
-    data_paths_.clear();
-    shards_.clear();
+    // rollover_ calls this on the frame thread while memory_usage() may be
+    // walking shards_ from a caller's thread, so the vector cannot be cleared
+    // unlocked -- its try_lock would succeed and it would read a freed buffer.
+    decltype(shards_) dead;
+    {
+        std::unique_lock lock(shards_mutex_);
+        dead.swap(shards_);
+        data_paths_.clear();
+    }
+
+    // dead's destructors finalize each shard (table write, S3 completion).
+    // Leaving that outside the lock keeps memory_usage() from failing its
+    // try_lock -- and silently dropping the shard term -- for a whole flush.
+}
+
+void
+zarr::Array::finish_write_()
+{
+    // close_() evaluates its predicate under write_counter_mutex_, so the
+    // decrement has to happen under it too: a notify landing between that
+    // evaluation and the wait's atomic release-and-block is lost, and if this
+    // was the last outstanding write, close_() would never wake.
+    {
+        std::lock_guard lock(write_counter_mutex_);
+        write_counter_.fetch_sub(1);
+    }
+
+    write_counter_cv_.notify_all();
 }
 
 size_t

@@ -86,6 +86,10 @@ class ArrayBase
 
     /**
      * @brief Get the amount of memory currently used by this Array, in bytes.
+     * @details Callable from any thread while frames are being written. Best
+     * effort: a buffer whose lock is held by a writer is omitted rather than
+     * waited for, so the result can under-report and must not be treated as
+     * exact. Never blocks the write path.
      * @return Memory used by this object, in bytes.
      */
     virtual size_t memory_usage() const noexcept = 0;

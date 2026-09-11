@@ -27,11 +27,15 @@ struct S3RequestTarget
 /**
  * @brief Resolve the request target for one object.
  * @details Virtual-host addressing is used for `*.amazonaws.com` endpoints,
- * which require it, and path style otherwise, which MinIO and most other
- * S3-compatible servers require. S3Client calls this for every request; it is
- * declared here so the addressing rules can be tested without a server.
- * @param endpoint Endpoint URL, which must begin with http:// or https://. Any
- * path, query or fragment is discarded.
+ * which require it, and path style otherwise, which most other S3-compatible
+ * servers require. A bucket whose name is not a legal DNS label -- because it
+ * contains a dot, an underscore or an upper-case letter -- falls back to path
+ * style even on AWS, since it cannot be prepended to the host. S3Client calls
+ * this for every request; it is declared here so the addressing rules can be
+ * tested without a server.
+ * @param endpoint Endpoint URL, which must begin with http:// or https://. The
+ * scheme and host are matched case-insensitively, and any path, query or
+ * fragment is discarded.
  * @param bucket_name The name of the bucket.
  * @param object_name The key within the bucket. Empty addresses the bucket
  * itself.
@@ -41,6 +45,18 @@ struct S3RequestTarget
 S3RequestTarget s3_request_target(const std::string& endpoint,
                                   std::string_view bucket_name,
                                   std::string_view object_name);
+
+/**
+ * @brief Check that an endpoint URL can be used for S3 requests.
+ * @details Applies exactly the rules s3_request_target() applies, so settings
+ * validation and the client cannot disagree about what is acceptable.
+ * @param endpoint Endpoint URL to check.
+ * @param error Set to the reason the endpoint was rejected, untouched
+ * otherwise.
+ * @returns True if the endpoint has a supported scheme and a host.
+ */
+[[nodiscard]] bool
+is_valid_s3_endpoint(const std::string& endpoint, std::string& error);
 
 /**
  * @brief A single append-only upload of one S3 object.
@@ -93,9 +109,9 @@ class S3Upload
  * shared by every writer thread; unlike the connection pool this replaces,
  * there is nothing to check out or return.
  *
- * Bucket addressing is chosen from the endpoint: virtual-host style for
- * `*.amazonaws.com`, path style otherwise, since MinIO and most other
- * S3-compatible servers require path style.
+ * Bucket addressing is chosen from the endpoint and the bucket name:
+ * virtual-host style for `*.amazonaws.com` with a bucket that is a legal DNS
+ * label, path style otherwise. See s3_request_target().
  *
  * Credentials come from the CRT's default chain (environment, AWS config
  * profile, ECS, then IMDS) and are never taken from the public API.
@@ -107,7 +123,8 @@ class S3Client
      * @brief Construct a client for the endpoint in @p settings.
      * @param settings Endpoint, bucket and optional region. The endpoint must
      * begin with http:// or https://. An absent region is signed as
-     * "us-east-1", which S3-compatible servers ignore.
+     * "us-east-1"; endpoints that validate the signing region require it to be
+     * set explicitly to match the server.
      * @throws std::runtime_error if the endpoint has no scheme or no host, or
      * if the underlying CRT client cannot be created.
      */

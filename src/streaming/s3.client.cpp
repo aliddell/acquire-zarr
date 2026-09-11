@@ -1,9 +1,7 @@
-#include "macros.hh"
-#include "s3.client.hh"
-
 // The CRT headers pull in windows.h transitively; its min/max macros would
 // otherwise break <algorithm> below. The sink this replaces did the same job
-// with an #undef min after the fact.
+// with an #undef min after the fact. This has to precede every include, since
+// any of them may reach windows.h first.
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -12,6 +10,10 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #endif
+
+#include "macros.hh"
+#include "s3.client.hh"
+#include "zarr.common.hh"
 
 #include <aws/crt/Api.h>
 #include <aws/crt/auth/Credentials.h>
@@ -69,22 +71,32 @@ struct Endpoint
 {
     std::string scheme;    // "http" or "https"
     std::string authority; // host, with port if one was given
-    bool virtual_host;     // bucket belongs in the host, not the path
+    bool aws_endpoint;     // real AWS, which requires virtual-host addressing
 };
 
-Endpoint
-parse_endpoint(const std::string& endpoint)
+/// Split @p endpoint into scheme and authority, or set @p error to why it
+/// cannot be. Shared by parse_endpoint() and zarr::is_valid_s3_endpoint() so
+/// that settings validation and the client cannot disagree about what is
+/// acceptable, and so the caller-facing message is written once.
+std::optional<Endpoint>
+try_parse_endpoint(const std::string& endpoint, std::string& error)
 {
     Endpoint parsed;
+
+    // Schemes and hostnames are case-insensitive, and only the scheme and
+    // authority survive the parse below, so fold the whole thing once. Error
+    // messages still quote what the caller actually passed.
+    const auto lowered = zarr::to_lower(endpoint);
 
     // Neither default is safe to guess: TLS would fail the handshake against a
     // plaintext server, and plaintext would silently downgrade one that
     // expected TLS. Make the caller say which they meant.
-    std::string_view rest(endpoint);
-    EXPECT(rest.starts_with("http://") || rest.starts_with("https://"),
-           "S3 endpoint '",
-           endpoint,
-           "' must begin with http:// or https://.");
+    std::string_view rest(lowered);
+    if (!rest.starts_with("http://") && !rest.starts_with("https://")) {
+        error =
+          "S3 endpoint '" + endpoint + "' must begin with http:// or https://";
+        return std::nullopt;
+    }
 
     if (rest.starts_with("https://")) {
         parsed.scheme = "https";
@@ -100,19 +112,58 @@ parse_endpoint(const std::string& endpoint)
         rest = rest.substr(0, end);
     }
 
-    EXPECT(!rest.empty(), "S3 endpoint '", endpoint, "' has no host.");
+    if (rest.empty()) {
+        error = "S3 endpoint '" + endpoint + "' has no host";
+        return std::nullopt;
+    }
     parsed.authority = std::string(rest);
 
-    // AWS requires virtual-host addressing; MinIO and most other S3-compatible
-    // servers require path style. Decide from the endpoint rather than adding a
-    // knob callers would have no way to know they must set.
+    // AWS requires virtual-host addressing; most other S3-compatible servers
+    // require path style. Decide from the endpoint rather than adding a knob
+    // callers would have no way to know they must set.
     std::string_view host = parsed.authority;
     if (const auto colon = host.rfind(':'); colon != std::string_view::npos) {
         host = host.substr(0, colon);
     }
-    parsed.virtual_host = host.ends_with(".amazonaws.com");
+    parsed.aws_endpoint = host.ends_with(".amazonaws.com");
 
     return parsed;
+}
+
+Endpoint
+parse_endpoint(const std::string& endpoint)
+{
+    std::string error;
+    auto parsed = try_parse_endpoint(endpoint, error);
+    EXPECT(parsed.has_value(), error);
+
+    return *parsed;
+}
+
+/// Whether @p bucket_name can be prepended to the endpoint as a DNS label.
+/// Virtual-host addressing puts the bucket in the hostname, so a name with a
+/// dot adds a label the `*.s3.<region>.amazonaws.com` wildcard certificate
+/// cannot match, and one with an underscore or an upper-case letter is not a
+/// legal hostname at all. Such buckets fall back to path style, which is what
+/// the AWS SDKs do and what AWS documents as the workaround.
+bool
+is_virtual_host_addressable(std::string_view bucket_name)
+{
+    if (bucket_name.size() < 3 || bucket_name.size() > 63) {
+        return false;
+    }
+
+    const auto is_alnum = [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+    };
+
+    if (!is_alnum(bucket_name.front()) || !is_alnum(bucket_name.back())) {
+        return false;
+    }
+
+    return std::all_of(bucket_name.begin(), bucket_name.end(), [&](char c) {
+        return is_alnum(c) || c == '-';
+    });
 }
 
 zarr::S3RequestTarget
@@ -122,7 +173,7 @@ make_target(const Endpoint& endpoint,
 {
     zarr::S3RequestTarget target;
 
-    if (endpoint.virtual_host) {
+    if (endpoint.aws_endpoint && is_virtual_host_addressable(bucket_name)) {
         target.uri = endpoint.scheme + "://" + std::string(bucket_name) + "." +
                      endpoint.authority;
         target.path = "/" + std::string(object_name);
@@ -277,6 +328,12 @@ zarr::s3_request_target(const std::string& endpoint,
     return make_target(parse_endpoint(endpoint), bucket_name, object_name);
 }
 
+bool
+zarr::is_valid_s3_endpoint(const std::string& endpoint, std::string& error)
+{
+    return try_parse_endpoint(endpoint, error).has_value();
+}
+
 struct zarr::S3Client::Impl
 {
     Endpoint endpoint;
@@ -330,13 +387,26 @@ zarr::S3Client::S3Client(const S3Settings& settings)
 {
     impl_->endpoint = parse_endpoint(settings.endpoint);
 
-    // SigV4 always needs a region. S3-compatible servers ignore it, and callers
-    // targeting real AWS were already obliged to supply the right one.
+    // SigV4 always needs a region. Use us-east-1 when none is configured;
+    // endpoints that validate the signing region require it to be set
+    // explicitly, so this is a starting point rather than a safe default.
     if (settings.region && !settings.region->empty()) {
         impl_->region = *settings.region;
     } else {
         impl_->region = "us-east-1";
         LOG_DEBUG("No S3 region configured; signing for ", impl_->region);
+    }
+
+    // path style against real AWS is the workaround for a bucket that cannot be
+    // a DNS label, not a choice; say so rather than leave it to be inferred
+    // from a rejected request
+    if (impl_->endpoint.aws_endpoint &&
+        !is_virtual_host_addressable(settings.bucket_name)) {
+        LOG_DEBUG("Bucket '",
+                  settings.bucket_name,
+                  "' is not a DNS label, so requests to ",
+                  settings.endpoint,
+                  " use path-style addressing");
     }
 
     auto& context = crt_context();

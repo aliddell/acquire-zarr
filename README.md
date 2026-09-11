@@ -721,9 +721,13 @@ stream is created.
 
 Configuration requires specifying the endpoint and bucket name. The endpoint
 must begin with `http://` or `https://`; there is no default scheme. The region
-is optional and defaults to `us-east-1`, which S3-compatible servers such as
-MinIO ignore; set it explicitly when writing to AWS. Requests use virtual-host
-addressing for `*.amazonaws.com` endpoints and path-style addressing otherwise:
+is optional and defaults to `us-east-1`; endpoints that validate the signing
+region require it to be set explicitly, so set it to match your server.
+
+Requests use virtual-host addressing for `*.amazonaws.com` endpoints and
+path-style addressing otherwise. A bucket whose name is not a legal DNS label —
+because it contains a dot, an underscore or an upper-case letter — uses path
+style even on AWS, since it cannot be prepended to the host:
 
 ```c
 // ensure your environment is set up for S3 access before running your program

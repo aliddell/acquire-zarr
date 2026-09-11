@@ -43,11 +43,9 @@ validate_s3_settings(const ZarrS3Settings* settings, std::string& error)
         return false;
     }
 
-    std::string endpoint = zarr::trim(settings->endpoint);
-    if (!endpoint.starts_with("http://") &&
-        !endpoint.starts_with("https://")) {
-        error = "S3 endpoint '" + endpoint +
-                "' must begin with http:// or https://";
+    // defer to the client, so validation cannot accept an endpoint the client
+    // would then throw on
+    if (!zarr::is_valid_s3_endpoint(zarr::trim(settings->endpoint), error)) {
         return false;
     }
 
@@ -986,6 +984,7 @@ ZarrStream::append(const char* key_,
         } else if (bytes_remaining < frame_size_bytes) { // begin partial frame
             if (frame_buffer.empty()) {
                 frame_buffer.resize(frame_size_bytes, 0);
+                output->frame_buffer_bytes.store(frame_buffer.size());
             }
 
             if (data) {
@@ -1066,10 +1065,25 @@ size_t
 ZarrStream_s::get_memory_usage() const noexcept
 {
     size_t usage = frame_queue_->bytes_used();
+
+    // try_lock: finalize_stream holds this across every array's close, and an
+    // estimate must not block on that. Under contention the arrays are omitted,
+    // which matches ArrayBase::memory_usage()'s own best-effort contract.
+    std::unique_lock arrays_lock(arrays_mutex_, std::try_to_lock);
+    if (!arrays_lock.owns_lock()) {
+        return usage;
+    }
+
     for (const auto& [key, output] : arrays_) {
-        const auto frame_buffer_size = output->frame_buffer.size();
-        const auto array_memory_usage = output->array->memory_usage();
-        usage += (frame_buffer_size + array_memory_usage);
+        // frame_buffer is resized on the appending thread, so its size is read
+        // from an atomic rather than from the vector
+        usage += output->frame_buffer_bytes.load();
+
+        // finalize_stream has moved the array out by the time it releases the
+        // lock above, so the slot can legitimately be empty
+        if (output->array) {
+            usage += output->array->memory_usage();
+        }
     }
 
     return usage;
@@ -1805,13 +1819,18 @@ finalize_stream(ZarrStream* stream)
         return false;
     }
 
-    for (auto& [key, output] : stream->arrays_) {
-        if (!zarr::finalize_array(std::move(output->array))) {
-            LOG_ERROR(
-              "Error finalizing Zarr stream. Failed to finalize array '",
-              key,
-              "'");
-            return false;
+    {
+        // get_memory_usage() may be polled from another thread right up to
+        // here; keep it out of the slots being emptied
+        std::unique_lock lock(stream->arrays_mutex_);
+        for (auto& [key, output] : stream->arrays_) {
+            if (!zarr::finalize_array(std::move(output->array))) {
+                LOG_ERROR(
+                  "Error finalizing Zarr stream. Failed to finalize array '",
+                  key,
+                  "'");
+                return false;
+            }
         }
     }
 

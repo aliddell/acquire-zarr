@@ -90,6 +90,9 @@ class Array : public ArrayBase
                             uint32_t internal_idx,
                             uint32_t shard_idx);
 
+    // Retire one outstanding write and wake close_() if it was the last.
+    void finish_write_();
+
     void rollover_();
     void close_sinks_();
 
