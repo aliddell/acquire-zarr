@@ -38,6 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the mutex the closing thread waits under, so a notification could be lost and the close would never wake.
 - `ZarrStream_get_current_memory_usage` no longer dereferences a null array when called concurrently with, or after,
   stream finalization.
+- Fixed a use-after-free when an array is destroyed without being finalized. Only the close path drained outstanding
+  writes, so an array released on an error path had the state those writes touch destroyed underneath them. The
+  destructor now drains as well.
 
 ## [0.9.0] - [2026-08-11](https://github.com/acquire-project/acquire-zarr/compare/v0.8.1...v0.9.0)
 

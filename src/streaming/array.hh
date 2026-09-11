@@ -19,6 +19,9 @@ class Array : public ArrayBase
           std::shared_ptr<FileHandlePool> file_handle_pool,
           std::shared_ptr<S3Client> s3_client);
 
+    // Waits for outstanding writes, which hold `this`, before members go away.
+    ~Array() override;
+
     size_t memory_usage() const noexcept override;
 
     [[nodiscard]] WriteResult write_frame(std::vector<uint8_t>& frame,

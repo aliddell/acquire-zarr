@@ -135,6 +135,21 @@ zarr::Array::Array(std::shared_ptr<ArrayConfig> config,
     }
 }
 
+zarr::Array::~Array()
+{
+    // The jobs dispatched by compress_and_flush_* capture `this` and touch
+    // write_counter_* when they retire, and the counter is incremented before
+    // the job is queued, so this covers jobs that have not started yet.
+    // close_() drains them, but it is only reached through finalize_array():
+    // an Array that goes out of scope without it -- on an error path, or in a
+    // unit test -- would otherwise have these members destroyed underneath
+    // still-running jobs. execute_job always runs the job it is given, so the
+    // count cannot be left stranded and this cannot wait forever.
+    std::unique_lock lock(write_counter_mutex_);
+    write_counter_cv_.wait(lock,
+                           [this]() { return write_counter_.load() == 0; });
+}
+
 size_t
 zarr::Array::memory_usage() const noexcept
 {
@@ -1001,15 +1016,15 @@ zarr::Array::close_sinks_()
 void
 zarr::Array::finish_write_()
 {
-    // close_() evaluates its predicate under write_counter_mutex_, so the
-    // decrement has to happen under it too: a notify landing between that
+    // Both of these must happen under the mutex the waiters evaluate their
+    // predicate under. The decrement, because a notify landing between that
     // evaluation and the wait's atomic release-and-block is lost, and if this
-    // was the last outstanding write, close_() would never wake.
-    {
-        std::lock_guard lock(write_counter_mutex_);
-        write_counter_.fetch_sub(1);
-    }
-
+    // was the last outstanding write the waiter would never wake. The notify,
+    // because ~Array is one of those waiters: notifying after releasing the
+    // lock would let it return and destroy the condition variable while this
+    // thread was still inside notify_all.
+    std::lock_guard lock(write_counter_mutex_);
+    write_counter_.fetch_sub(1);
     write_counter_cv_.notify_all();
 }
 
