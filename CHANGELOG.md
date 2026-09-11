@@ -9,11 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `is_ngff` flag on `ZarrArraySettings` to explicitly request OME-NGFF multiscales wrapping without
+  requiring downsampling (#213)
+- `ZarrDownsamplingMethod_None` sentinel value for explicitly representing "no downsampling" (#213)
 - `ZARR_DIRECT_IO` environment variable: when set, file handles are opened with `O_DIRECT` so writes bypass the OS page
   cache. Off by default, Linux only, and only valid on filesystems that accept unaligned direct writes, such as NFS
 
 ### Changed
 
+- The numeric values of `ZarrDownsamplingMethod` have shifted by one, because
+  `ZarrDownsamplingMethod_None` was inserted as the new zero value. Config files, which spell the
+  method as a string, and the Python `DownsamplingMethod` members are unaffected; but C code that
+  persisted the raw integers, and Python code unpickling a `DownsamplingMethod` pickled by 0.9.0 or
+  earlier, will read back a different method than it stored (#213)
+- The layout of `ZarrArraySettings` has changed, since `multiscale` was removed and `is_ngff` added,
+  so callers must recompile against the new header rather than relink against the new binary (#213)
+- Setting a downsampling method continues to coerce `is_ngff` to true (#213)
+- The config schema version is now `2`. Version-2 configs use `is_ngff` in place of `multiscale`, and
+  `downsampling_method` gained a `"none"` value. A version-1 config still loads and is translated
+  using version-1 semantics: `multiscale: true` becomes `is_ngff: true`, defaulting
+  `downsampling_method` to `decimate`, and a `downsampling_method` without `multiscale` is ignored. A
+  config that omits `version` is read as the current schema (#213)
+- A version-2 config containing `multiscale` is rejected with an error rather than silently
+  reinterpreted, as is a version-1 config containing `is_ngff` (#213)
+- In a version-2 config, `downsampling_method` is honoured on its own. Previously `downsampling_method`
+  was only read when `multiscale` was true, so a config that set it alone produced a plain array; it
+  now produces an OME-NGFF multiscales group, relocating the data from `<output_key>/` to
+  `<output_key>/0/`. Set `downsampling_method: none` to keep the old plain-array layout (#213)
 - Replaced the `minio-cpp` submodule with the [aws-crt-cpp](https://github.com/awslabs/aws-crt-cpp) vcpkg package for
   S3 storage.
 - ⚠️ **Breaking:** the S3 `endpoint` must now begin with `http://` or `https://`. `minio-cpp` treated a scheme-less
@@ -28,6 +50,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An array key that is a strict prefix of another array key (for example `"foo"` alongside `"foo/bar"`) is now
+  rejected regardless of the order in which the keys are declared. Previously, declaring the longer key first was
+  accepted and wrote a group `zarr.json` over the array node, stranding its chunks with no readable array
+  metadata (#213)
+- Clearing `downsampling_method` now restores the previously requested `is_ngff` value instead of leaving it stuck
+  at the coerced `true`, which silently wrote an OME-NGFF group with the data one level deeper than the plain
+  array the caller asked for (#213)
+- `ArraySettings.__repr__` (Python) includes `is_ngff`, which otherwise made a plain array and an OME-NGFF group
+  print identically (#213)
+- Configuring an HCS field of view no longer writes the FOV path back into the caller's
+  `ZarrArraySettings.output_key` (#213)
 - Fixed a data race in `S3Sink`. `Shard::write_chunk` claims each chunk's offset under a lock but writes outside it, and
   each chunk is its own thread-pool job, so byte ranges reached the sink concurrently and out of order while it mutated
   its buffer without synchronization. The sink now stages fragments and appends them in order.
@@ -41,6 +74,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed a use-after-free when an array is destroyed without being finalized. Only the close path drained outstanding
   writes, so an array released on an error path had the state those writes touch destroyed underneath them. The
   destructor now drains as well.
+
+### Removed
+
+- `ZarrArraySettings.multiscale` (C) and `ArraySettings.multiscale` (Python), replaced by `is_ngff`.
+  What `multiscale = false` expressed is now the default of `is_ngff = false` with
+  `downsampling_method = ZarrDownsamplingMethod_None` (`None` in Python); what `multiscale = true`
+  expressed is `is_ngff = true`, with or without a downsampling method (#213)
 
 ## [0.9.0] - [2026-08-11](https://github.com/acquire-project/acquire-zarr/compare/v0.8.1...v0.9.0)
 

@@ -27,7 +27,7 @@
 struct ZarrStream_s
 {
   public:
-    ZarrStream_s(struct ZarrStreamSettings_s* settings);
+    explicit ZarrStream_s(const ZarrStreamSettings_s* settings);
 
     /**
      * @brief Append data to the stream with a specific key.
@@ -121,13 +121,13 @@ struct ZarrStream_s
      * @brief Configure the stream for an array.
      * @param settings Struct containing settings to configure.
      * @param parent_path Path to the parent group of the array.
-     * @param is_hcs_array Whether this array is an HCS array and must be
-     * treated as multiscale even if no downsampling method is supplied.
+     * @param force_ngff Treat the array as OME-NGFF regardless of @p settings.
+     * True for HCS fields of view, which are always multiscales groups.
      * @return True if the array was configured successfully, false otherwise.
      */
     [[nodiscard]] bool configure_array_(const ZarrArraySettings* settings,
                                         const std::string& parent_path,
-                                        bool is_hcs_array);
+                                        bool force_ngff);
 
     /**
      * @brief Commit HCS settings to the stream.
@@ -135,8 +135,7 @@ struct ZarrStream_s
      * @return True if the HCS settings were committed successfully, false
      * otherwise.
      */
-    [[nodiscard]] bool commit_hcs_settings_(
-      const ZarrHCSSettings* hcs_settings);
+    [[nodiscard]] bool commit_hcs_settings_(const ZarrHCSSettings* hcs_settings);
 
     /**
      * @brief Copy settings to the stream and create the output node.

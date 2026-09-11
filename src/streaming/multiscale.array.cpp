@@ -285,6 +285,7 @@ zarr::MultiscaleArray::make_base_array_config_() const
                                          config_->dtype,
                                          std::nullopt,
                                          0,
+                                         true,
                                          config_->max_levels);
 }
 
