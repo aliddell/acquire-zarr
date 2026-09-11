@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - [2026-09-11](https://github.com/acquire-project/acquire-zarr/compare/v0.9.0...v0.10.0)
+
 ### Added
 
 - `is_ngff` flag on `ZarrArraySettings` to explicitly request OME-NGFF multiscales wrapping without
@@ -14,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ZarrDownsamplingMethod_None` sentinel value for explicitly representing "no downsampling" (#213)
 - `ZARR_DIRECT_IO` environment variable: when set, file handles are opened with `O_DIRECT` so writes bypass the OS page
   cache. Off by default, Linux only, and only valid on filesystems that accept unaligned direct writes, such as NFS
+  (#250)
 
 ### Changed
 
@@ -50,6 +53,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   print identically (#213)
 - Configuring an HCS field of view no longer writes the FOV path back into the caller's
   `ZarrArraySettings.output_key` (#213)
+- The Python bindings are now built against the interpreter of the environment the wheel is destined for.
+  A PEP 517 build on macOS could resolve to a Homebrew framework Python of a different minor version than
+  the target environment, producing an extension module for the wrong ABI (#251)
 
 ### Removed
 
