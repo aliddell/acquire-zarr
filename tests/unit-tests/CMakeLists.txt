@@ -13,6 +13,7 @@ set(tests
         array-dimensions-courtesy-flush
         thread-pool-push-to-job-queue
         resolve-max-threads
+        resolve-direct-io
         construct-data-paths
         endpoint-request-target
         s3-client-bucket-exists

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ZARR_DIRECT_IO` environment variable: when set, file handles are opened with `O_DIRECT` so writes bypass the OS page
+  cache. Off by default, Linux only, and only valid on filesystems that accept unaligned direct writes, such as NFS
+
 ### Changed
 
 - Replaced the `minio-cpp` submodule with the [aws-crt-cpp](https://github.com/awslabs/aws-crt-cpp) vcpkg package for

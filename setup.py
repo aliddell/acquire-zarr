@@ -32,9 +32,6 @@ class CMakeBuild(build_ext):
             f"-DCMAKE_BUILD_TYPE={cfg}",
             "-DBUILD_PYTHON=ON",
             "-DBUILD_TESTING=OFF",
-            # CMake's find_package(Python3) searches PATH, which is not the
-            # interpreter running this build backend. Point it at ourselves so
-            # the bindings link against the Python that has pybind11 installed.
             f"-DPython3_EXECUTABLE={sys.executable}",
         ]
 
